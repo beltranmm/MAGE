@@ -7,25 +7,42 @@ classdef MAGE_functions
 %         
 %         INPUT:
 %         
-%               profile -- double -- (genes, samples)
+%               m -- double -- ()
 %
-%               level -- double -- minimum expression level
+%               n -- double -- 
 %
+%               mu -- double --
+%
+%               sigma  --double --
+%
+%               DErate 
 %               sampleMin -- double -- minimum number of samples needed to
 %            	be above minimum level
-%         
+
+%               
 %         OUTPUT:
 %
 %               sim_profile -- double -- (gene, samples)
-%
+
         
-        function sim_profile = simData(m,n,mu,sigma)
+        function sim_profile = simData(m,n,mu,sigma,DErate)
             
             sim_profile = zeros(m,2*n);
             for i = 1 : m
-                geneMean = bas(mu + randn(1);
+                geneMean = abs(mu + mu*randn(1));
+                geneSD = abs(sigma + sigma*randn(1));
+                
                 for j = 1 : n
-                    sim_profile(i,j) = randn(1);
+                    sim_profile(i,j) = geneMean + geneSD*randn(1);
+                end
+                
+                if DErate >= rand
+                    geneMean = abs(mu + mu*randn(1));
+                end
+                geneSD = abs(sigma + sigma*randn(1));
+                
+                for j = 1 : n
+                    sim_profile(i,j+n) = geneMean + geneSD*randn(1);
                 end
             end
             

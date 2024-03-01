@@ -7,17 +7,21 @@ classdef MAGE_functions
 %         
 %         INPUT:
 %         
-%               profile -- double -- (genes, samples)
+%               m -- double -- ()
 %
-%               level -- double -- minimum expression level
+%               n -- double -- 
 %
-%               sampleMin -- double -- minimum number of samples needed to
-%            	be above minimum level
-%         
+%               mu -- double --
+%
+%               sigma  -- double --
+%
+%               DErate -- double --
+%
+%               
 %         OUTPUT:
 %
 %               sim_profile -- double -- (gene, samples)
-%
+
         
         function sim_profile = simData(m,n,mu,sigma,DErate)
             
@@ -64,7 +68,7 @@ classdef MAGE_functions
 %               profile for every gene in the filyered profile
 %
         
-        function [filtered_profile, filteredInd] = fltr(profile,level,sampleMin) 
+        function [filtered_profile, filteredInd] = fltr(profile,    level,sampleMin) 
             keepGene = false(size(profile,1),1);
             for g = 1 : size(profile,1)
                 keepGene(g) =...
