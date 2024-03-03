@@ -7,40 +7,44 @@ classdef MAGE_functions
 %         
 %         INPUT:
 %         
-%               m -- double -- ()
+%               m -- double -- number of genes
 %
-%               n -- double -- 
+%               n -- double -- number of sample replicates
 %
-%               mu -- double --
+%               mu -- double -- mean expression of all genes
 %
-%               sigma  -- double --
+%               sigma  -- double -- mean standard deviation of all genes
 %
-%               DErate -- double --
+%               DErate -- double -- rate of differential expression
 %
 %               
 %         OUTPUT:
 %
 %               sim_profile -- double -- (gene, samples)
+%               
+%               DEind -- double -- indices of differntially expressed genes
 
         
-        function sim_profile = simData(m,n,mu,sigma,DErate)
+        function [sim_profile,DEind] = simData(m,n,mu,sigma,DErate)
             
             sim_profile = zeros(m,2*n);
+            DEind = false(m,1);
             for i = 1 : m
                 geneMean = abs(mu + mu*randn(1));
                 geneSD = abs(sigma + sigma*randn(1));
                 
                 for j = 1 : n
-                    sim_profile(i,j) = geneMean + geneSD*randn(1);
+                    sim_profile(i,j) = abs(geneMean + geneSD*randn(1));
                 end
                 
                 if DErate >= rand
                     geneMean = abs(mu + mu*randn(1));
+                    DEind(i) = true;
                 end
                 geneSD = abs(sigma + sigma*randn(1));
                 
                 for j = 1 : n
-                    sim_profile(i,j+n) = geneMean + geneSD*randn(1);
+                    sim_profile(i,j+n) = abs(geneMean + geneSD*randn(1));
                 end
             end
             
@@ -68,7 +72,7 @@ classdef MAGE_functions
 %               profile for every gene in the filyered profile
 %
         
-        function [filtered_profile, filteredInd] = fltr(profile,    level,sampleMin) 
+        function [filtered_profile, filteredInd] = fltr(profile,level,sampleMin) 
             keepGene = false(size(profile,1),1);
             for g = 1 : size(profile,1)
                 keepGene(g) =...
@@ -76,6 +80,64 @@ classdef MAGE_functions
             end
             filtered_profile = profile(keepGene,:);
             filteredInd = keepGene;
+        end
+        
+        %% ROC
+%         DESCRIPTION: Calculate the true/false positive rates based on
+%         given test statistic by sweeping classification cutoff values
+%         
+%         INPUT:
+%         
+%               t -- double -- test statistic values
+%
+%               trueInd -- double -- indices of true target classifications
+%         
+%         OUTPUT:
+%
+%               TPR -- double -- points for true-positive rate
+%
+%               FPR -- double -- points for false-positive rate
+%
+        function [TPR,FPR] = ROC(t,trueInd)
+            numpts = 1000;
+            
+            step = (max(t) - min(t))/numpts;
+            cutoff = min(t);
+            
+            TPR = zeros(numpts,1);
+            FPR = zeros(numpts,1);
+
+            for i = 1 : numel(TPR)
+                TPR(i) = numel(find(t(trueInd) >= cutoff))/numel(find(trueInd));
+                FPR(i) = 1 - numel(find(t(~trueInd) < cutoff))/numel(find(~trueInd));
+
+                cutoff = cutoff + step;
+            end
+        end
+        
+        %% AUC
+%         DESCRIPTION: Calculate area under the curve from ROC using
+%         monte-carlo area est.
+%         
+%         INPUT:
+%         
+%               FPR -- double -- X-axis points from ROC (false-positives)
+%
+%               TPR -- double -- Y-axis points from ROC (true-positives)
+%         
+%         OUTPUT:
+%
+%               auc -- double -- area under the curve
+%
+        function auc = AUC(FPR,TPR)
+            numMCpts = 1000000;
+            
+            % enclose area outlined by ROC
+            c = [FPR,TPR;[0,0];[1,0]];
+            c = unique(c,'stable','rows');
+            
+            rp = rand(numMCpts,2);
+            auc = numel(find(inpolygon(rp(:,1),rp(:,2),c(:,1),c(:,2))))/numMCpts;
         end
 
     end
