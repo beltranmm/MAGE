@@ -287,7 +287,7 @@ function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,data
     
     
     
-    %% assign gene OS
+    %% determine OS_raw
     disp('Assigning outlier scores')
     confidenceContInd = zeros(size(densityContPoints,2),1);
     temp = 1;
@@ -334,16 +334,13 @@ function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,data
 
             % find shortest distance to contour of mean point
             for contourSeg = 1 : size(confidenceCont,1) - 1
-                %initialize w/ z-direction for cross function
-                tempA = zeros(3,1);
-                tempB = zeros(3,1);
-
-                tempA(1:2) = confidenceCont(contourSeg,:) -...
+                
+                tempA = confidenceCont(contourSeg,:) -...
                     confidenceCont(contourSeg+1,:);
-                tempB(1:2) = [geneMeanX(k),geneMeanY(k)] -...
+                tempB = [geneMeanX(k),geneMeanY(k)] -...
                     confidenceCont(contourSeg+1,:);
 
-                distToSeg = norm(cross(tempA,tempB))/norm(tempA);
+                distToSeg = norm(tempB - tempA);
 
                 if distToSeg < abs(OutlierDistScore(k)) || firstPointCalc(k)
                     firstPointCalc(k) = 0;
@@ -371,7 +368,7 @@ function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,data
 
     
     
-    %% OS adjustments
+    %% OS distance adjustment
     if removeHighLowExpr
         % remove low/high expression outlier Scores
         meanDataXSort = sort(dataX);

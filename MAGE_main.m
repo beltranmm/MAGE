@@ -42,7 +42,7 @@ title('Filtered mean expression')
 
 %% find aberrantly expressed genes using MAGE
 
-[~,OS] = MAGE(profile(:,1:4),profile(:,5:8),100,5,1,0.9);
+[~,OS] = MAGE(profile(:,1:4),profile(:,5:8),100,5,1,0.99);
 
 %% find differentially expressed genes based on fold-change
 
