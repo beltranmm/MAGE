@@ -176,7 +176,7 @@ function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,data
 
                 zeroVertices = 0;
 
-                % Monte-Carlo sampling from CPDF
+                % 
                 monteCarloSampleSize = 1000;
                 randPoints = [gridDensity*rand(monteCarloSampleSize,1),...
                     gridDensity*rand(monteCarloSampleSize,1)];

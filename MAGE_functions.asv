@@ -61,7 +61,7 @@ classdef MAGE_functions
 %               shift -- double -- mean expression of all genes
 %
 %               sigma  -- double -- standard deviation of normally
-%                                   distributed noise
+%                          distributed noise
 %               
 %         OUTPUT:
 %
