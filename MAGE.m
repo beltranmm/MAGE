@@ -1,7 +1,7 @@
 % 
 
 
-function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,dataY,varargin)    
+function [OutlierScore, FDR] = MAGE(dataX,dataY,varargin)    
     
     %% check input parameters
     narginchk(2,10)
@@ -452,60 +452,64 @@ function [OutlierDistScore, OutlierScore, printConfidenceCont] = MAGE(dataX,data
         xticklabels(round((xticks - 1)*gridwidth + startx - gridwidth,1))
         yticklabels(round((yticks - 1)*gridwidth + startx - gridwidth,1))
     
-    
-        figure;
-        subplot(3,1,1)
-        plot(geneProbContainedInLv,'LineWidth',3)
-        yline(targetContainment,'--r','T: target');
-        hold on
-        plot(optimalContLv,geneProbContainedInLv(optimalContLv),'r*','LineWidth',2,'MarkerSize',10)
-        text(optimalContLv+2,geneProbContainedInLv(optimalContLv),'Optimal Contour','Color','red')
-        hold off
-        title('Contour Probability Coverage')
-        xlabel('Contour Level')
-        ylabel('% of Prob')
-        ax = gca;
-        set(ax,'LineWidth',2,'FontWeight','bold')
-        subplot(3,1,3)
-        plot(contEffectiveness,'LineWidth',3)
-        hold on
-        plot(optimalContLv,contEffectiveness(optimalContLv),'r*','LineWidth',2,'MarkerSize',10)
-        text(optimalContLv+2,contEffectiveness(optimalContLv),'Optimal Contour','Color','red')
-        hold off
-        title('Contour Effectiveness')
-        xlabel('Contour Level')
-        ylabel('CE')
-        ax = gca;
-        set(ax,'LineWidth',2,'FontWeight','bold')
-        sgtitle('Optimal Contour Selection Criteria')
-        
-        figure;
-        subplot(3,1,1)
-        plot(contourLoopsOptimalInfo(:,1),'LineWidth',3)
-        yline(targetContainment,'--r','T: target');
-        title('Contour Probability Coverage')
-        xlabel('Iteration')
-        ylabel('% of Prob')
-        ax = gca;
-        set(ax,'LineWidth',2,'FontWeight','bold')
-        subplot(3,1,2)
-        plot(contourLoopsOptimalInfo(:,2),'LineWidth',3)
-        title('Contour Size')
-        xlabel('Iteration')
-        ylabel('log_2(S + 1)')
-        ax = gca;
-        set(ax,'LineWidth',2,'FontWeight','bold')
-        subplot(3,1,3)
-        plot(contourLoopsOptimalInfo(:,3),'LineWidth',3)
-        title('Contour Effectiveness')
-        xlabel('Iteration')
-        ylabel('CE')
-        ax = gca;
-        set(ax,'LineWidth',2,'FontWeight','bold')
-        sgtitle('Contour Optimization')
         figure; % catch new contour plots
     end
     
+    
+    %% Calculate FDR
+    if nargout >= 2
+        
+        disp('Calculating FDR')
+        
+        % permuate samples
+        dataTotal = [dataX, dataY];
+        for i = 1 : 10
+            dataTotal = dataTotal(:,randperm(size(dataTotal,2))');
+        end
+
+
+        % Keep only equally expressed (EE) genes
+        % by removing genes with highest 10% OS
+        [~,OS_sortInd] = sort(OutlierScore);
+        dataTotal = dataTotal(OS_sortInd(1:round(0.9*numel(OS_sortInd))),:);
+        dataX = dataTotal(:,1:size(dataX,2));
+        dataY = dataTotal(:,1:size(dataY,2));
+        
+        % recursive call with permutated data
+        OutlierScore_perm = MAGE(dataX,dataY,gridDensity,...
+            numContours,outputPlots,targetContainment,...
+            removeHighLowExpr,contourLoopsMax,numStartingContours);
+        
+        % calculate FDR at each OS
+        OS_FDR = zeros(100,2);
+        outlierScoreCutoff = 0;
+        
+        for i = 1 : size(OS_FDR,1)
+            numAbove = numel(find(OutlierScore >= outlierScoreCutoff));
+            numAbove_P = numel(find(OutlierScore_perm >= outlierScoreCutoff));
+            
+            OS_FDR(i,1) = outlierScoreCutoff;
+            OS_FDR(i,2) = numAbove_P/(numAbove + numAbove_P);
+            
+            outlierScoreCutoff = outlierScoreCutoff + 1/size(OS_FDR,1);
+        end
+        OS_FDR(isnan(OS_FDR(:,2)),2) = 0;
+        
+        figure;
+        scatter(OS_FDR(:,1),OS_FDR(:,2),'filled')
+        xlabel('OS')
+        ylabel('FDR')
+        set(gca,'TickDir','out');
+        
+        
+        
+        % assign FDR to genes
+        FDR = zeros(size(OutlierScore,1),1);
+        for i = 1 : numel(FDR)
+            [~,tmp] = min(abs(OutlierScore(i) - OS_FDR(:,1)));
+            FDR(i) = OS_FDR(tmp,2);
+        end 
+    end
     
     
 end

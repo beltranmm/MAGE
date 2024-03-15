@@ -53,23 +53,23 @@ title('Filtered mean expression')
 
 %% find aberrantly expressed genes using MAGE
 
-%[~,OS] = MAGE(profile(:,1:4),profile(:,5:8),100,5,1,0.9);
+[OS,FDR] = MAGE(profile(:,1:4),profile(:,5:8),100,5,0,0.9);
 
-OS_complete = zeros(numGene,8);
-T = 0.1;
-for i = 1 : 8
-    [~,OS] = MAGE(profile(:,1:4),profile(:,5:8),100,5,1,T);
-    
-    OS_complete(:,i) = OS;
-    
-    T = T + 0.1;
-end
-
-OS = max(OS_complete')';
-
-% OS = mean(OS_complete')';
-
-OS = sum(OS_complete')';
+% OS_complete = zeros(numGene,8);
+% T = 0.1;
+% for i = 1 : 8
+%     OS = MAGE(profile(:,1:4),profile(:,5:8),100,5,1,T);
+%     
+%     OS_complete(:,i) = OS;
+%     
+%     T = T + 0.1;
+% end
+% 
+% OS = max(OS_complete')';
+% 
+% % OS = mean(OS_complete')';
+% 
+% OS = sum(OS_complete')';
 
 %% find differentially expressed genes based on fold-change
 
