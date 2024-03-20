@@ -365,8 +365,8 @@ function [OutlierScore, FDR] = MAGE(dataX,dataY,varargin)
     %% OS distance adjustment
     if removeHighLowExpr
         % remove low/high expression outlier Scores
-        meanDataXSort = sort(dataX);
-        meanDataYSort = sort(dataY);
+        meanDataXSort = sort(mean(dataX,2));
+        meanDataYSort = sort(mean(dataY,2));
         lowX = meanDataXSort(floor(...
             (1-contourLoopsOptimalInfo(end,1))/2*numGene));
         lowY = meanDataYSort(floor(...
