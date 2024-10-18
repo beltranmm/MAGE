@@ -55,6 +55,10 @@ title('Filtered mean expression')
 
 [OS,FDR] = MAGE(profile(:,1:4),profile(:,5:8),100,5,0,0.9);
 
+figure;
+histogram(FDR)
+
+
 % OS_complete = zeros(numGene,8);
 % T = 0.1;
 % for i = 1 : 8
