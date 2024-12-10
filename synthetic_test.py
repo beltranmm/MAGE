@@ -8,7 +8,7 @@ import numpy as np
 def test():
     # --- Generate synthetic data for testing ---
     num_genes = 100
-    num_replicates = 10
+    num_replicates = 5
     corr = 0.9
 
     # Random gene expression data for X and Y (simulating biological data)
