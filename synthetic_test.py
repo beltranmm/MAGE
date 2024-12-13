@@ -6,18 +6,19 @@ import MAGE
 import numpy as np
 
 def test():
+    
     # --- Generate synthetic data for testing ---
     num_genes = 100
     num_replicates = 5
     corr = 0.9
 
     # Random gene expression data for X and Y (simulating biological data)
-    #data_x = np.random.rand(num_genes, num_replicates) * 100
-    #data_y = np.random.rand(num_genes, num_replicates) * 100
     data_x, data_y = generate_data(num_genes, num_replicates, corr)
+
+
     # --- Run MAGE function ---
     print("Running MAGE...")
-    density_matrix = MAGE.mage(data_x, data_y)
+    results = MAGE.mage(data_x, data_y)
 
 def generate_data(num_genes, replicates, correlation=0.5, avg_std_x=5, avg_std_y=5):
     """

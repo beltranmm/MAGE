@@ -9,7 +9,7 @@ from scipy.spatial.distance import euclidean
 
 def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000):
+         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False):
     """
     MAGE (Minimal Area Gaussian Estimator) workflow to compute outlier scores for genes.
 
@@ -65,19 +65,30 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
 
     # Monte Carlo sampling to fill the density matrix
     print("Summing gene probabilities...")
-    x_coords = start_x + np.arange(grid_density) * grid_width
-    y_coords = start_y + np.arange(grid_density) * grid_height
+    x_coords = np.linspace(start_x, start_x + grid_density * grid_width, grid_density)
+    y_coords = np.linspace(start_y, start_y + grid_density * grid_height, grid_density)
 
     for k in range(num_genes):
         x_pdf = norm.pdf(x_coords[:, None], gene_mean_x[k], gene_std_x[k])  # Shape: (grid_density, 1)
         y_pdf = norm.pdf(y_coords[None, :], gene_mean_y[k], gene_std_y[k])  # Shape: (1, grid_density)
         density_mat += np.dot(x_pdf, y_pdf)
 
+    if output_diags:
+        plt.figure(figsize=(8, 6))
+        plt.imshow(density_mat, cmap='hot', interpolation='nearest', origin='lower')
+        plt.colorbar(label="PDF")
+        plt.title("Density Matrix Heatmap")
+        plt.show()
+
     # --- Step 3: Determine CER (Characteristic Expression Region) ---
     print("Determining characteristic expression region...")
     density_mat = np.pad(density_mat, pad_width=1, mode='constant', constant_values=0)
     contour_range = np.linspace(np.min(density_mat), np.max(density_mat), num_starting_contours)
-    contour_loops_optimal_info = np.zeros((contour_loops_max, 3))
+    cer_effectivness = 0
+
+    if output_diags:
+        cer_plot_fig = plt.figure(figsize=(10, 6))
+        cer_plot = cer_plot_fig.subplots()
 
     # monte carlo sampling from each gene
     monte_carlo_points = np.zeros((num_genes*monte_carlo_sample_size,2))
@@ -87,45 +98,65 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
                     np.random.normal(gene_mean_x[i], gene_std_x[i], monte_carlo_sample_size),
                     np.random.normal(gene_mean_y[i], gene_std_y[i], monte_carlo_sample_size),])
     
+    # convert MC points (TPM) points to grid scale
+    monte_carlo_points[:,0] = (monte_carlo_points[:,0]-start_x)/grid_width + 2
+    monte_carlo_points[:,1] = (monte_carlo_points[:,1]-start_y)/grid_height + 2
+    
+    # Find contour that contains specified number of MC points
     for c in range(contour_loops_max):
-        cs = plt.contour(np.log(density_mat + 1), levels=contour_range)
+        contour_fig = plt.figure()
+        contour_ax = contour_fig.subplots()
+        cs = contour_ax.contour(np.log(density_mat + 1), levels=contour_range)
         contours = cs.allsegs
         levels = cs.levels
-        plt.close()  # Close the contour plot if no display is needed
+        plt.close(contour_fig)  # Close the contour plot if no display is needed
 
-        gene_prob_contained_in_lv = np.zeros(len(levels))
+        gene_prob_contained_in_lv = np.zeros((len(levels),monte_carlo_sample_size*num_genes))
 
         for lv, contour_set in enumerate(contours):
             if len(contour_set) == 0:  # Skip empty contours
                 continue
             for s in range(len(contour_set)):
                 path = Path(contour_set[s])
-                gene_prob_contained_in_lv[lv]+= np.sum(path.contains_points(monte_carlo_points))
+                #gene_prob_contained_in_lv[lv,:]+= np.sum(path.contains_points(monte_carlo_points))
+                region_contains = path.contains_points(monte_carlo_points)
+                gene_prob_contained_in_lv[lv,region_contains] = 1
+                #for i in range(monte_carlo_sample_size):
+                    #gene_prob_contained_in_lv[lv,i] = any((gene_prob_contained_in_lv[lv,i],region_contains[i]))
 
-        gene_prob_contained_in_lv = gene_prob_contained_in_lv/monte_carlo_sample_size
+        gene_prob_contained_in_lv = np.sum(gene_prob_contained_in_lv,1)/(monte_carlo_sample_size*num_genes)
         cont_effectiveness = 1 - np.abs(target_containment - gene_prob_contained_in_lv)
         optimal_lv_idx = np.argmax(cont_effectiveness)
-        contour_loops_optimal_info[c] = [gene_prob_contained_in_lv[optimal_lv_idx], 
-                                         levels[optimal_lv_idx], 
-                                         cont_effectiveness[optimal_lv_idx]]
-        print(cont_effectiveness[optimal_lv_idx])
-
-        # select new range of contour levels
-        if optimal_lv_idx > 1 and optimal_lv_idx < num_starting_contours:
-            contour_range = np.linspace(contour_range[optimal_lv_idx - 1], contour_range[optimal_lv_idx + 1], num_starting_contours)
+        
+        # exit loop if no improvement
+        if c > 0 and cont_effectiveness[optimal_lv_idx] <= cer_effectivness:
+            break
         else:
-            break
+            cer = contours[optimal_lv_idx]
+            cer_effectivness = cont_effectiveness[optimal_lv_idx]
+            if output_diags:
+                for region in cer:
+                    cer_plot.plot(region[:, 0], region[:, 1], color='black')
 
-        if c > 0 and contour_loops_optimal_info[c, 2] <= contour_loops_optimal_info[c - 1, 2]:
-            contour_loops_optimal_info = contour_loops_optimal_info[:c]
-            break
+            # select new range of contour levels
+            if optimal_lv_idx > 1 and optimal_lv_idx < num_starting_contours:
+                contour_range = np.linspace(contour_range[optimal_lv_idx - 1], contour_range[optimal_lv_idx + 1], num_starting_contours)
+            else:
+                break
 
-    optimal_cont_lv = levels[optimal_lv_idx]  # Use the actual level value
-    optimal_cont_lv = int(contour_loops_optimal_info[-1, 1])
-
-    if output_plots:
+    if output_diags:
+        cer_plot.set_title('MC sampling')
+        cer_plot.set_xlabel('Mean Expression (X)')
+        cer_plot.set_ylabel('Mean Expression (Y)')
+        cer_plot.grid(True)
+        cer_plot.legend()
+        cer_plot_fig.show()
         visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
-                                        gene_mean_x, gene_mean_y, gene_std_x, gene_std_y)
+                                gene_mean_x, gene_mean_y, gene_std_x, gene_std_y)
+        
+    if output_plots:
+        visualize_MC_sampling(gene_mean_x, gene_mean_y, monte_carlo_points,
+                              cer, start_x, start_y, grid_width, grid_height)
 
     # --- Step 4: Assign outlier scores ---
     print("Assigning outlier scores...")
@@ -134,39 +165,34 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
 
 
     # Vectorized Monte Carlo sampling for outlier scores
-    for region in contours[optimal_cont_lv]:
-        if len(region) == 0:
-            continue
+    outlier_score = np.zeros(num_genes)
+    for i in range(num_genes):
+        for region in cer:
+            if len(region) == 0:
+                continue
 
-        path = Path(region)
-        rand_points = np.column_stack([
-            np.repeat(gene_mean_x, monte_carlo_sample_size) + 
-            np.repeat(gene_std_x, monte_carlo_sample_size) * np.random.randn(num_genes * monte_carlo_sample_size),
-            np.repeat(gene_mean_y, monte_carlo_sample_size) + 
-            np.repeat(gene_std_y, monte_carlo_sample_size) * np.random.randn(num_genes * monte_carlo_sample_size),
-        ])
-        gene_indices = np.repeat(np.arange(num_genes), monte_carlo_sample_size)
-        inside_mask = path.contains_points(rand_points)
-        inside_gene_counts = np.bincount(gene_indices[inside_mask], minlength=num_genes)
-        outlier_score += inside_gene_counts / monte_carlo_sample_size
+            path = Path(region)
+            ind = monte_carlo_sample_size*(i-1)
+            outlier_score[i]+= np.sum(path.contains_points(monte_carlo_points[range(ind,ind+monte_carlo_sample_size),:]))
+
+        
+    outlier_score = 1 - outlier_score / monte_carlo_sample_size
 
     # --- Step 5: Adjust outlier scores ---
     print("Adjusting outlier scores...")
-    adjusted_score, inliers, outliers = adjust_outlier_scores(
-        data_x, data_y, outlier_score, outlier_dist_score, 
-        remove_high_low_expr, contour_loops_optimal_info, num_genes
-    )
+    adjusted_score, inliers, outliers = adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
+                                                            remove_high_low_expr, target_containment, num_genes)
 
     # --- Step 6: Output Results ---
     if output_plots:
         visualize_outlier_scores(data_x, data_y, adjusted_score, inliers, outliers, 
-                             contours, optimal_cont_lv, start_x, start_y, grid_width, grid_height)
+                                cer, start_x, start_y, grid_width, grid_height)
         
     return adjusted_score, inliers, outliers
 
 
 def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
-                          remove_high_low_expr, contour_loops_optimal_info, num_genes):
+                          remove_high_low_expr, target_containment, num_genes):
     """
     Adjusts the outlier scores by removing high/low expression outliers and ranking distance scores.
 
@@ -201,11 +227,10 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
         mean_data_x_sort = np.sort(np.mean(data_x, axis=1))
         mean_data_y_sort = np.sort(np.mean(data_y, axis=1))
         
-        containment = contour_loops_optimal_info[-1, 0]
-        low_x = mean_data_x_sort[int(np.floor((1 - containment) / 2 * num_genes))]
-        low_y = mean_data_y_sort[int(np.floor((1 - containment) / 2 * num_genes))]
-        high_x = mean_data_x_sort[int(np.ceil((containment + (1 - containment) / 2) * num_genes))]
-        high_y = mean_data_y_sort[int(np.ceil((containment + (1 - containment) / 2) * num_genes))]
+        low_x = mean_data_x_sort[int(np.floor((1 - target_containment) / 2 * num_genes))]
+        low_y = mean_data_y_sort[int(np.floor((1 - target_containment) / 2 * num_genes))]
+        high_x = mean_data_x_sort[int(np.ceil((target_containment + (1 - target_containment) / 2) * num_genes))]
+        high_y = mean_data_y_sort[int(np.ceil((target_containment + (1 - target_containment) / 2) * num_genes))]
 
         # Remove scores for genes with low/high expression
         for i in range(num_genes):
@@ -304,7 +329,7 @@ def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_wi
 
 
 def visualize_outlier_scores(data_x, data_y, adjusted_scores, inliers, outliers, 
-                             contours, optimal_cont_lv, start_x, start_y, grid_width, grid_height):
+                             cer, start_x, start_y, grid_width, grid_height):
     """
     Visualizes the outlier scores and characteristic expression regions.
 
@@ -342,8 +367,8 @@ def visualize_outlier_scores(data_x, data_y, adjusted_scores, inliers, outliers,
     plt.ylabel('Mean Expression (Y)')
     plt.grid(True)
 
-    # Overlay the contour
-    for region in contours[optimal_cont_lv]:
+    # Overlay the CER
+    for region in cer:
         plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='Optimal Contour')
     plt.legend()
     plt.show()
@@ -367,6 +392,48 @@ def visualize_outlier_scores(data_x, data_y, adjusted_scores, inliers, outliers,
     plt.ylabel('Mean Expression (Y)')
     plt.legend()
     plt.grid(True)
+    plt.show()
+
+
+def visualize_MC_sampling(gene_mean_x, gene_mean_y, monte_carlo_points, cer, start_x, start_y, grid_width, grid_height):
+    """
+    Visualizes the outlier scores and characteristic expression regions.
+
+    Parameters:
+    - data_x, data_y: np.ndarray
+        Input gene expression data arrays (genes x replicates).
+    - adjusted_scores: np.ndarray
+        Adjusted outlier scores for visualization.
+    - inliers, outliers: np.ndarray
+        Indices of inliers and outliers.
+    - gene_mean_x, gene_mean_y: np.ndarray
+        Mean expression values for each gene.
+    - contours: list
+        List of contour paths from the MAGE process.
+    - optimal_cont_lv: int
+        Index of the optimal contour level.
+    """
+
+    # convert gene means (TPM) points to grid scale
+    gene_mean_x_grid = (gene_mean_x-start_x)/grid_width + 2
+    gene_mean_y_grid = (gene_mean_y-start_y)/grid_height + 2
+
+    # Scatter plot
+    plt.figure(figsize=(10, 6))
+    plt.scatter(monte_carlo_points[:,0], monte_carlo_points[:,1],
+                 c='b', s=5, edgecolor='b', alpha=0.7, label='MC Sampling')
+    plt.scatter(gene_mean_x_grid, gene_mean_y_grid,
+                 c='r', s=50, edgecolor='r', alpha=0.7, label='Gene Means')
+
+    # Overlay the CER
+    for region in cer:
+        plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='Optimal Contour')
+
+    plt.title('MC sampling')
+    plt.xlabel('Mean Expression (X)')
+    plt.ylabel('Mean Expression (Y)')
+    plt.grid(True)
+    plt.legend()
     plt.show()
 
 
