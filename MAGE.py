@@ -237,7 +237,7 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
             mean_x = np.mean(data_x[i, :])
             mean_y = np.mean(data_y[i, :])
             if (mean_x <= low_x and mean_y <= low_y) or (mean_x >= high_x and mean_y >= high_y):
-                outlier_score[i] = 1
+                outlier_score[i] = 0
 
     # Cap outlier score at 1
     outlier_score[outlier_score > 1] = 1
@@ -250,8 +250,9 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
     d_penalty[negative_d_indices] = d_penalty[negative_d_indices] / len(negative_d_indices)
 
     # Adjust outlier score by standard deviation
-    adjusted_outlier_score = 1 - outlier_score - d_penalty
+    adjusted_outlier_score = outlier_score + d_penalty
     adjusted_outlier_score[adjusted_outlier_score < 0] = 0
+    adjusted_outlier_score[adjusted_outlier_score > 1] = 1
 
     # Identify genes with top 5% highest outlier scores
     sorted_indices = np.argsort(adjusted_outlier_score)
@@ -262,6 +263,108 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
 
     return adjusted_outlier_score, np.where(in_indices)[0], out_indices
 
+def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_plots=True, 
+         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
+         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False):
+    # permutate data
+    data_x, data_y = permute_and_filter(data_x, data_y, outlier_score, 10)
+
+    # call MAGE w/ permutated data
+    OS_perm, in_perm, out_perm = mage(data_x, data_y, grid_density, num_contours, output_plots,
+                    target_containment, remove_high_low_expr, contour_loops_max, 
+                    num_starting_contours, monte_carlo_sample_size, output_diags)
+    
+    # calculate FDR
+    FDR = calculate_fdr(outlier_score, OS_perm, 100, output_plots)
+
+def permute_and_filter(dataX, dataY, OutlierScore, num_permutations=10):
+    """
+    Permute columns of data, and filter out genes with the highest 10% OutlierScore.
+
+    Parameters:
+        dataX (ndarray): First data matrix.
+        dataY (ndarray): Second data matrix.
+        OutlierScore (ndarray): Array containing outlier scores for genes.
+        num_permutations (int): Number of times to permute columns. Default is 10.
+
+    Returns:
+        dataX_filtered (ndarray): Filtered dataX after removing top 10% outlier genes.
+        dataY_filtered (ndarray): Filtered dataY after removing top 10% outlier genes.
+    """
+    # Step 1: Concatenate dataX and dataY horizontally
+    dataTotal = np.hstack((dataX, dataY))
+
+    # Step 2: Permute columns randomly, 'num_permutations' times
+    for _ in range(num_permutations):
+        permuted_indices = np.random.permutation(dataTotal.shape[1])
+        dataTotal = dataTotal[:, permuted_indices]
+
+    # Step 3: Sort indices by OutlierScore (ascending) and keep 90% of genes
+    sorted_indices = np.argsort(OutlierScore)  # Sort in ascending order
+    keep_indices = sorted_indices[:round(0.9 * len(sorted_indices))]  # Keep bottom 90%
+
+    # Step 4: Filter rows (genes) based on indices
+    dataTotal_filtered = dataTotal[keep_indices, :]
+
+    # Step 5: Split back into dataX and dataY
+    dataX_filtered = dataTotal_filtered[:, :dataX.shape[1]]
+    dataY_filtered = dataTotal_filtered[:, dataX.shape[1]:]
+
+    return dataX_filtered, dataY_filtered
+
+def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=False):
+    """
+    Calculate the False Discovery Rate (FDR) at each Outlier Score (OS).
+
+    Parameters:
+        OutlierScore (ndarray): Array of observed outlier scores.
+        OutlierScore_perm (ndarray): Array of permuted outlier scores.
+        num_steps (int): Number of OS thresholds to evaluate. Default is 100.
+
+    Returns:
+        OS_FDR (ndarray): 2D array with OS thresholds and corresponding FDR values.
+    """
+    # Initialize OS_FDR array
+    OS_FDR = np.zeros((num_steps, 2))
+
+    # Initial outlier score cutoff
+    outlier_score_cutoff = 0
+
+    # Step size for outlier score cutoff
+    step_size = 1 / num_steps
+
+    # Calculate FDR for each threshold
+    for i in range(num_steps):
+        num_above = np.sum(OutlierScore >= outlier_score_cutoff)
+        num_above_perm = np.sum(OutlierScore_perm >= outlier_score_cutoff)
+
+        OS_FDR[i, 0] = outlier_score_cutoff
+        OS_FDR[i, 1] = num_above_perm / (num_above + num_above_perm) if (num_above + num_above_perm) > 0 else 0
+
+        outlier_score_cutoff += step_size
+
+    # Replace NaN values in FDR column with 0
+    OS_FDR[np.isnan(OS_FDR[:, 1]), 1] = 0
+
+    # Plot FDR scatter plot
+    if output_plot:
+        plt.figure(figsize=(8, 6))
+        plt.scatter(OS_FDR[:, 0], OS_FDR[:, 1], color='blue', label='FDR')
+        plt.title("FDR at Each Outlier Score Cutoff")
+        plt.xlabel("Outlier Score Cutoff")
+        plt.ylabel("FDR")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+    # Assign FDR to genes
+    gene_FDR = np.zeros((len(OutlierScore), 1))
+    for i in range(len(OutlierScore)):
+        ind = np.argmin((abs(OS_FDR[:,0]-OutlierScore[i])))
+        gene_FDR[i] = OS_FDR[ind,1]
+
+
+    return gene_FDR
 
 def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
     gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None):
