@@ -9,7 +9,7 @@ from scipy.spatial.distance import euclidean
 
 def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False):
+         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM'):
     """
     MAGE (Minimal Area Gaussian Estimator) workflow to compute outlier scores for genes.
 
@@ -145,18 +145,13 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
                 break
 
     if output_diags:
-        cer_plot.set_title('MC sampling')
-        cer_plot.set_xlabel('Mean Expression (X)')
-        cer_plot.set_ylabel('Mean Expression (Y)')
+        cer_plot.set_xlabel('Mean Expression (' + units + ')')
+        cer_plot.set_ylabel('Mean Expression (' + units + ')')
         cer_plot.grid(True)
         cer_plot.legend()
         cer_plot_fig.show()
         visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
-                                gene_mean_x, gene_mean_y, gene_std_x, gene_std_y)
-        
-    if output_plots:
-        visualize_MC_sampling(gene_mean_x, gene_mean_y, monte_carlo_points,
-                              cer, start_x, start_y, grid_width, grid_height)
+                                gene_mean_x, gene_mean_y, gene_std_x, gene_std_y, units)
 
     # --- Step 4: Assign outlier scores ---
     print("Assigning outlier scores...")
@@ -185,10 +180,10 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
 
     # --- Step 6: Output Results ---
     if output_plots:
-        visualize_outlier_scores(data_x, data_y, adjusted_score, inliers, outliers, 
-                                cer, start_x, start_y, grid_width, grid_height)
+        visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_score, monte_carlo_points,
+                              cer, start_x, start_y, grid_width, grid_height, units)
         
-    return adjusted_score, inliers, outliers
+    return adjusted_score
 
 
 def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
@@ -270,7 +265,7 @@ def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_
     data_x, data_y = permute_and_filter(data_x, data_y, outlier_score, 10)
 
     # call MAGE w/ permutated data
-    OS_perm, in_perm, out_perm = mage(data_x, data_y, grid_density, num_contours, output_plots,
+    OS_perm = mage(data_x, data_y, grid_density, num_contours, output_plots,
                     target_containment, remove_high_low_expr, contour_loops_max, 
                     num_starting_contours, monte_carlo_sample_size, output_diags)
     
@@ -367,7 +362,7 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
     return gene_FDR
 
 def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
-    gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None):
+    gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None, units = 'TPM'):
     """
     Visualizes all contours from the density matrix and overlays gene positions.
 
@@ -422,83 +417,15 @@ def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_wi
     )
 
     # Plot labels and legend
-    plt.xlabel("Mean Expression (X)")
-    plt.ylabel("Mean Expression (Y)")
+    plt.xlabel('Mean Expression (' + units + ')')
+    plt.ylabel('Mean Expression (' + units + ')')
     plt.title("All Contours with Gene Positions (Pre-CER Selection)")
     plt.colorbar(cs, label="Log-Density Levels")
     plt.legend()
     plt.grid(True)
     plt.show()
 
-
-def visualize_outlier_scores(data_x, data_y, adjusted_scores, inliers, outliers, 
-                             cer, start_x, start_y, grid_width, grid_height):
-    """
-    Visualizes the outlier scores and characteristic expression regions.
-
-    Parameters:
-    - data_x, data_y: np.ndarray
-        Input gene expression data arrays (genes x replicates).
-    - adjusted_scores: np.ndarray
-        Adjusted outlier scores for visualization.
-    - inliers, outliers: np.ndarray
-        Indices of inliers and outliers.
-    - gene_mean_x, gene_mean_y: np.ndarray
-        Mean expression values for each gene.
-    - contours: list
-        List of contour paths from the MAGE process.
-    - optimal_cont_lv: int
-        Index of the optimal contour level.
-    """
-
-    # Extract gene means (needed for visualization)
-    gene_mean_x = np.mean(data_x, axis=1)
-    gene_mean_y = np.mean(data_y, axis=1)
-
-    # convert gene means (TPM) points to grid scale
-    gene_mean_x_grid = (gene_mean_x-start_x)/grid_width + 2
-    gene_mean_y_grid = (gene_mean_y-start_y)/grid_height + 2
-
-    # Scatter plot of gene means colored by outlier scores
-    plt.figure(figsize=(10, 6))
-    scatter = plt.scatter(
-        gene_mean_x_grid, gene_mean_y_grid, c=adjusted_scores, cmap='coolwarm', s=50, edgecolor='k', alpha=0.7
-    )
-    plt.colorbar(scatter, label='Outlier Score')
-    plt.title('Gene Expression with Outlier Scores')
-    plt.xlabel('Mean Expression (X)')
-    plt.ylabel('Mean Expression (Y)')
-    plt.grid(True)
-
-    # Overlay the CER
-    for region in cer:
-        plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='Optimal Contour')
-    plt.legend()
-    plt.show()
-
-    # Plot histogram of adjusted outlier scores
-    plt.figure(figsize=(8, 6))
-    plt.hist(adjusted_scores, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
-    plt.axvline(np.percentile(adjusted_scores, 95), color='red', linestyle='--', label='95% Threshold')
-    plt.title('Distribution of Adjusted Outlier Scores')
-    plt.xlabel('Outlier Score')
-    plt.ylabel('Frequency')
-    plt.legend()
-    plt.show()
-
-    # Scatter plot highlighting inliers and outliers
-    plt.figure(figsize=(10, 6))
-    plt.scatter(gene_mean_x[inliers], gene_mean_y[inliers], color='green', label='Inliers', alpha=0.7)
-    plt.scatter(gene_mean_x[outliers], gene_mean_y[outliers], color='red', label='Outliers', alpha=0.7)
-    plt.title('Inliers vs Outliers in Gene Expression')
-    plt.xlabel('Mean Expression (X)')
-    plt.ylabel('Mean Expression (Y)')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-
-def visualize_MC_sampling(gene_mean_x, gene_mean_y, monte_carlo_points, cer, start_x, start_y, grid_width, grid_height):
+def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo_points, cer, start_x, start_y, grid_width, grid_height, units):
     """
     Visualizes the outlier scores and characteristic expression regions.
 
@@ -524,17 +451,18 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, monte_carlo_points, cer, sta
     # Scatter plot
     plt.figure(figsize=(10, 6))
     plt.scatter(monte_carlo_points[:,0], monte_carlo_points[:,1],
-                 c='b', s=5, edgecolor='b', alpha=0.7, label='MC Sampling')
-    plt.scatter(gene_mean_x_grid, gene_mean_y_grid,
-                 c='r', s=50, edgecolor='r', alpha=0.7, label='Gene Means')
+                 c='g', s=5, edgecolor='g', alpha=0.5, label='MC Sampling')
+    scatter = plt.scatter(
+        gene_mean_x_grid, gene_mean_y_grid, c=adjusted_scores, cmap='magma', vmin=0, vmax=1,
+          s=50, edgecolor='k', alpha=0.7, label='Gene Mean')
+    plt.colorbar(scatter, label='Outlier Score')
 
     # Overlay the CER
     for region in cer:
-        plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='Optimal Contour')
+        plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='CER')
 
-    plt.title('MC sampling')
-    plt.xlabel('Mean Expression (X)')
-    plt.ylabel('Mean Expression (Y)')
+    plt.xlabel('Mean Expression (' + units + ')')
+    plt.ylabel('Mean Expression (' + units + ')')
     plt.grid(True)
     plt.legend()
     plt.show()

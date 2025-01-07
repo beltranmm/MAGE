@@ -18,7 +18,7 @@ def test():
 
     # --- Run MAGE function ---
     print("Running MAGE...")
-    OS, inliers, outliers = MAGE.mage(data_x, data_y)
+    OS = MAGE.mage(data_x, data_y)
     FDR = MAGE.FDR(data_x, data_y, OS)
 
 def generate_data(num_genes, replicates, correlation=0.5, avg_std_x=5, avg_std_y=5):
