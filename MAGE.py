@@ -2,6 +2,8 @@
 # 11/25/2024
 
 import numpy as np
+import math
+import random
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.stats import norm
@@ -360,6 +362,58 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
 
 
     return gene_FDR
+
+def analyze_depth(dataX, dataY, OutlierScore, units = 'TPM'):
+    # convert to integers
+    num_gene = dataX.shape[0]
+    fracs = np.zeros((2*num_gene, dataX.shape[1]))
+
+    for i in range(num_gene):
+        for j in range(dataX.shape[1]):
+            fracs[i,j] = dataX[i,j] - math.floor(dataX[i,j])
+    for i in range(num_gene):
+        for j in range(dataY.shape[1]):
+            fracs[i + num_gene, j] = dataY[i,j] - math.floor(dataY[i,j])
+
+    minMult = 1/np.min(fracs)
+
+    dataX = dataX*minMult
+    dataY = dataY*minMult
+    dataX = dataX.round()
+    dataY = dataY.round()
+
+
+    # est. reads per gene per replicate set
+
+    # add loop for other replicate sets
+    totalReadX = np.sum(dataX[:,0])
+    totalReadY = np.sum(dataY[:,0])
+
+    listedReadX = np.zeros((int(totalReadX),1))
+    ind = 0
+    for i in range(num_gene):
+        prevInd = ind
+        ind = ind + int(dataX[i,0])
+        listedReadX[prevInd:ind] = i
+
+    listedReadY = np.zeros((int(totalReadY),1))
+    ind = 0
+    for i in range(num_gene):
+        prevInd = ind
+        ind = ind + int(dataY[i,0])
+        listedReadY[prevInd:ind] = i
+
+    # Binary sampling of indices
+    sampledReadX = random.sample(listedReadX.tolist(),int(0.5*totalReadX))
+    sampledReadY = random.sample(listedReadY.tolist(),int(0.5*totalReadY))
+
+    # calculate new expression with reduced depth
+    for i in range(num_gene):
+        print(float(i), sampledReadX.count(float(i)))
+        dataX[i,0] = sampledReadX.count(int(i))
+        dataY[i,0] = sampledReadY.count(i)
+
+    return sampledReadX[1:10]
 
 def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
     gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None, units = 'TPM'):
