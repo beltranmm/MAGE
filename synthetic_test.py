@@ -21,8 +21,8 @@ def test():
     #OS = MAGE.mage(data_x, data_y)
     #FDR = MAGE.FDR(data_x, data_y, OS)
 
-    OS = np.zeros((num_genes,1))
-    temp = MAGE.analyze_depth(data_x, data_y, OS)
+    
+    temp = MAGE.analyze_depth(data_x, data_y, (0.1, 0.4, 0.7, 1, 1.3))
     print(temp)
 
 def generate_data(num_genes, replicates, correlation=0.5, avg_std_x=5, avg_std_y=5):

@@ -11,7 +11,8 @@ from scipy.spatial.distance import euclidean
 
 def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM'):
+         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM',
+         notifications = True):
     """
     MAGE (Minimal Area Gaussian Estimator) workflow to compute outlier scores for genes.
 
@@ -51,14 +52,14 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
     num_genes = data_x.shape[0]
 
     # --- Step 1: Calculate gene statistics ---
-    print("Calculating gene statistics...")
+    if notifications: print("Calculating gene statistics...")
     gene_mean_x = np.mean(data_x, axis=1)
     gene_mean_y = np.mean(data_y, axis=1)
     gene_std_x = np.std(data_x, axis=1) + 0.0001
     gene_std_y = np.std(data_y, axis=1) + 0.0001
 
     # --- Step 2: Fit the grid ---
-    print("Fitting the grid...")
+    if notifications: print("Fitting the grid...")
     grid_height = (np.ptp(gene_mean_y) + 4 * np.mean(np.abs(gene_std_y))) / grid_density
     grid_width = (np.ptp(gene_mean_x) + 4 * np.mean(np.abs(gene_std_x))) / grid_density
     density_mat = np.zeros((grid_density, grid_density))
@@ -66,7 +67,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
     start_y = np.min(gene_mean_y) - 2 * np.mean(np.abs(gene_std_y)) + 0.00001
 
     # Monte Carlo sampling to fill the density matrix
-    print("Summing gene probabilities...")
+    if notifications: print("Summing gene probabilities...")
     x_coords = np.linspace(start_x, start_x + grid_density * grid_width, grid_density)
     y_coords = np.linspace(start_y, start_y + grid_density * grid_height, grid_density)
 
@@ -83,7 +84,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
         plt.show()
 
     # --- Step 3: Determine CER (Characteristic Expression Region) ---
-    print("Determining characteristic expression region...")
+    if notifications: print("Determining characteristic expression region...")
     density_mat = np.pad(density_mat, pad_width=1, mode='constant', constant_values=0)
     contour_range = np.linspace(np.min(density_mat), np.max(density_mat), num_starting_contours)
     cer_effectivness = 0
@@ -156,7 +157,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
                                 gene_mean_x, gene_mean_y, gene_std_x, gene_std_y, units)
 
     # --- Step 4: Assign outlier scores ---
-    print("Assigning outlier scores...")
+    if notifications: print("Assigning outlier scores...")
     outlier_score = np.zeros(num_genes)
     outlier_dist_score = np.zeros(num_genes)
 
@@ -176,9 +177,10 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
     outlier_score = 1 - outlier_score / monte_carlo_sample_size
 
     # --- Step 5: Adjust outlier scores ---
-    print("Adjusting outlier scores...")
+    if notifications: print("Adjusting outlier scores...")
     adjusted_score, inliers, outliers = adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
-                                                            remove_high_low_expr, target_containment, num_genes)
+                                                            remove_high_low_expr, target_containment, num_genes,
+                                                            notifications=notifications)
 
     # --- Step 6: Output Results ---
     if output_plots:
@@ -189,7 +191,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
 
 
 def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
-                          remove_high_low_expr, target_containment, num_genes):
+                          remove_high_low_expr, target_containment, num_genes, notifications = True):
     """
     Adjusts the outlier scores by removing high/low expression outliers and ranking distance scores.
 
@@ -215,10 +217,10 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
     - out_indices: np.ndarray
         Indices of genes classified as "outlier."
     """
-    print("Adjusting outlier scores")
+    if notifications: print("Adjusting outlier scores")
     
     if remove_high_low_expr:
-        print("Removing low/high expression outlier scores")
+        if notifications: print("Removing low/high expression outlier scores")
 
         # Sort the mean values of data_x and data_y
         mean_data_x_sort = np.sort(np.mean(data_x, axis=1))
@@ -363,57 +365,96 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
 
     return gene_FDR
 
-def analyze_depth(dataX, dataY, OutlierScore, units = 'TPM'):
+def analyze_depth(dataX, dataY, depths, include_original = True, units = 'TPM', top_cutoff = 0.05):
+
+    OS = np.zeros((dataX.shape[0],len(depths)))
+
+    for d in range(len(depths)):
+        print("Running depth " + str(d+1) + " of " + str(len(depths)))
+        dataX_adj, dataY_adj = adjust_depth(dataX, dataY, depths[d])
+        OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= False, units= units, notifications=False)
+
+    if include_original:
+        OS_original = mage(dataX, dataY, output_plots=False, units=units, notifications=False)
+        sort_ind = np.argsort(OS_original)
+        top_ind_orig = sort_ind[-int(np.ceil(len(OS_original)*top_cutoff)):]
+
+        agreement = np.zeros((len(depths),1))
+
+        for d in range(len(depths)):
+            sort_ind = np.argsort(OS[:,d])
+            top_ind = sort_ind[-int(np.ceil(OS.shape[0]*top_cutoff)):]
+            overlap = np.intersect1d(top_ind,top_ind_orig)
+            agreement[d] = len(overlap)/int(np.ceil(len(OS_original)*top_cutoff))
+
+        plt.figure(figsize=(10, 8))
+        plt.scatter(depths, agreement, color="red", s=50, edgecolor="k", alpha=0.7)
+        plt.xlabel('Sampling Depth %')
+        plt.ylabel('% Agreement')
+        plt.show()
+
+    return agreement
+
+def adjust_depth(dataX, dataY, depth):
     # convert to integers
     num_gene = dataX.shape[0]
-    fracs = np.zeros((2*num_gene, dataX.shape[1]))
+    #fracs = np.zeros((2*num_gene, dataX.shape[1]))
 
-    for i in range(num_gene):
-        for j in range(dataX.shape[1]):
-            fracs[i,j] = dataX[i,j] - math.floor(dataX[i,j])
-    for i in range(num_gene):
-        for j in range(dataY.shape[1]):
-            fracs[i + num_gene, j] = dataY[i,j] - math.floor(dataY[i,j])
+    #for i in range(num_gene):
+    #    for j in range(dataX.shape[1]):
+    #        fracs[i,j] = dataX[i,j] - math.floor(dataX[i,j])
+    #for i in range(num_gene):
+    #    for j in range(dataY.shape[1]):
+    #        fracs[i + num_gene, j] = dataY[i,j] - math.floor(dataY[i,j])
 
-    minMult = 1/np.min(fracs)
+    #minMult = 1/np.min(fracs)
 
-    dataX = dataX*minMult
-    dataY = dataY*minMult
+    #dataX = dataX*minMult
+    #dataY = dataY*minMult
     dataX = dataX.round()
     dataY = dataY.round()
 
 
     # est. reads per gene per replicate set
 
-    # add loop for other replicate sets
-    totalReadX = np.sum(dataX[:,0])
-    totalReadY = np.sum(dataY[:,0])
+    for rep in range(dataX.shape[1]):
+        totalReadX = np.sum(dataX[:,rep])
+        totalReadY = np.sum(dataY[:,rep])
 
-    listedReadX = np.zeros((int(totalReadX),1))
-    ind = 0
-    for i in range(num_gene):
-        prevInd = ind
-        ind = ind + int(dataX[i,0])
-        listedReadX[prevInd:ind] = i
+        listedReadX = np.zeros((int(totalReadX),1))
+        ind = 0
+        for i in range(num_gene):
+            prevInd = ind
+            ind = ind + int(dataX[i,rep])
+            listedReadX[prevInd:ind] = i
 
-    listedReadY = np.zeros((int(totalReadY),1))
-    ind = 0
-    for i in range(num_gene):
-        prevInd = ind
-        ind = ind + int(dataY[i,0])
-        listedReadY[prevInd:ind] = i
+        listedReadY = np.zeros((int(totalReadY),1))
+        ind = 0
+        for i in range(num_gene):
+            prevInd = ind
+            ind = ind + int(dataY[i,rep])
+            listedReadY[prevInd:ind] = i
 
-    # Binary sampling of indices
-    sampledReadX = random.sample(listedReadX.tolist(),int(0.5*totalReadX))
-    sampledReadY = random.sample(listedReadY.tolist(),int(0.5*totalReadY))
+        # Binary sampling of indices
+        sampledReadListX = random.choices(listedReadX.tolist(),k=int(depth*totalReadX))
+        sampledReadListY = random.choices(listedReadY.tolist(),k=int(depth*totalReadY))
 
-    # calculate new expression with reduced depth
-    for i in range(num_gene):
-        print(float(i), sampledReadX.count(float(i)))
-        dataX[i,0] = sampledReadX.count(int(i))
-        dataY[i,0] = sampledReadY.count(i)
+        # index list
+        sampledReadX = [0]*len(sampledReadListX)
+        sampledReadY = [0]*len(sampledReadListY)
+        for i in range(len(sampledReadListX)):
+            sampledReadX[i] = sampledReadListX[i][0]
+        for i in range(len(sampledReadListY)):
+            sampledReadY[i] = sampledReadListY[i][0]
+    
 
-    return sampledReadX[1:10]
+
+        # calculate new expression with reduced depth
+        for i in range(num_gene):
+            dataX[i,rep] = sampledReadX.count(i)
+            dataY[i,rep] = sampledReadY.count(i)
+    
+    return dataX, dataY
 
 def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
     gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None, units = 'TPM'):
