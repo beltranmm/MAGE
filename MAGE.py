@@ -2,16 +2,15 @@
 # 11/25/2024
 
 import numpy as np
-import math
 import random
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.stats import norm
 from scipy.spatial.distance import euclidean
 
-def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True, 
-         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM',
+def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True, 
+         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
+         num_starting_contours=20, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM',
          notifications = True):
     """
     MAGE (Minimal Area Gaussian Estimator) workflow to compute outlier scores for genes.
@@ -81,12 +80,18 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
         plt.imshow(density_mat, cmap='hot', interpolation='nearest', origin='lower')
         plt.colorbar(label="PDF")
         plt.title("Density Matrix Heatmap")
+        plt.xlabel('Mean Expression (' + units + ')')
+        plt.ylabel('Mean Expression (' + units + ')')
         plt.show()
 
     # --- Step 3: Determine CER (Characteristic Expression Region) ---
     if notifications: print("Determining characteristic expression region...")
     density_mat = np.pad(density_mat, pad_width=1, mode='constant', constant_values=0)
-    contour_range = np.linspace(np.min(density_mat), np.max(density_mat), num_starting_contours)
+    density_mat = np.log(density_mat + 1)
+    contour_range_min = np.min(density_mat)
+    contour_range_max = np.max(density_mat)
+    contour_range = np.linspace(contour_range_min, contour_range_max, num_starting_contours)
+    contour_range_history = contour_range
     cer_effectivness = 0
 
     if output_diags:
@@ -109,7 +114,8 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
     for c in range(contour_loops_max):
         contour_fig = plt.figure()
         contour_ax = contour_fig.subplots()
-        cs = contour_ax.contour(np.log(density_mat + 1), levels=contour_range)
+        contour_range = np.sort(contour_range)
+        cs = contour_ax.contour(density_mat, levels=contour_range)
         contours = cs.allsegs
         levels = cs.levels
         plt.close(contour_fig)  # Close the contour plot if no display is needed
@@ -121,11 +127,9 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
                 continue
             for s in range(len(contour_set)):
                 path = Path(contour_set[s])
-                #gene_prob_contained_in_lv[lv,:]+= np.sum(path.contains_points(monte_carlo_points))
                 region_contains = path.contains_points(monte_carlo_points)
                 gene_prob_contained_in_lv[lv,region_contains] = 1
-                #for i in range(monte_carlo_sample_size):
-                    #gene_prob_contained_in_lv[lv,i] = any((gene_prob_contained_in_lv[lv,i],region_contains[i]))
+                
 
         gene_prob_contained_in_lv = np.sum(gene_prob_contained_in_lv,1)/(monte_carlo_sample_size*num_genes)
         cont_effectiveness = 1 - np.abs(target_containment - gene_prob_contained_in_lv)
@@ -142,18 +146,24 @@ def mage(data_x, data_y, grid_density=50, num_contours=20, output_plots=True,
                     cer_plot.plot(region[:, 0], region[:, 1], color='black')
 
             # select new range of contour levels
-            if optimal_lv_idx > 1 and optimal_lv_idx < num_starting_contours:
-                contour_range = np.linspace(contour_range[optimal_lv_idx - 1], contour_range[optimal_lv_idx + 1], num_starting_contours)
-            else:
-                break
-
+            if optimal_lv_idx > 1:
+                contour_range_min = contour_range[optimal_lv_idx - 1]
+            if optimal_lv_idx < num_starting_contours:
+                contour_range_max = contour_range[optimal_lv_idx + 1]
+            
+            contour_range = np.linspace(contour_range_min, contour_range_max, num_contours)
+            contour_range_history = np.append(contour_range_history,contour_range)
+            num_starting_contours = num_contours
+    
     if output_diags:
         cer_plot.set_xlabel('Mean Expression (' + units + ')')
         cer_plot.set_ylabel('Mean Expression (' + units + ')')
         cer_plot.grid(True)
         cer_plot.legend()
         cer_plot_fig.show()
-        visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
+        contour_range_history = np.unique(contour_range_history)
+        contour_range_history = np.sort(contour_range_history)
+        visualize_all_contours(density_mat, contour_range_history, start_x, start_y, grid_width, grid_height, 
                                 gene_mean_x, gene_mean_y, gene_std_x, gene_std_y, units)
 
     # --- Step 4: Assign outlier scores ---
@@ -540,8 +550,13 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo
     """
 
     # convert gene means (TPM) points to grid scale
+    print(gene_mean_x)
+    print(start_x)
+    
     gene_mean_x_grid = (gene_mean_x-start_x)/grid_width + 2
     gene_mean_y_grid = (gene_mean_y-start_y)/grid_height + 2
+
+    print(gene_mean_x_grid)
 
     # Scatter plot
     plt.figure(figsize=(10, 6))
@@ -558,8 +573,16 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo
 
     plt.xlabel('Mean Expression (' + units + ')')
     plt.ylabel('Mean Expression (' + units + ')')
-    plt.grid(True)
+    locs = plt.xticks()[0]
+    labels = np.round((locs-2)*grid_width + start_x)
+    plt.xticks(locs,labels)
+    locs = plt.yticks()[0]
+    labels = np.round((locs-2)*grid_width + start_y)
+    plt.yticks(locs,labels)
     plt.legend()
+    for pos in ['right', 'top']:
+        plt.gca().spines[pos].set_visible(False)
+    plt.tick_params(direction='in')
     plt.show()
 
 

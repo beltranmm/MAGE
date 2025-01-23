@@ -55,7 +55,7 @@ def test():
     
     # --- Run MAGE function ---
     print("Running gt3 test...")
-    OS = MAGE.mage(profile[:,controlInd], profile[:,treatmentInd])
+    OS = MAGE.mage(profile[:,controlInd], profile[:,treatmentInd], output_diags=True)
     #FDR = MAGE.FDR(data_x, data_y, OS)
 
 
