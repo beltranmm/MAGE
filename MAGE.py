@@ -7,13 +7,15 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.stats import norm
 from scipy.spatial.distance import euclidean
+import csv
+import pickle
 
 def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
          num_starting_contours=20, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM',
-         notifications = True):
+         notifications = True, saveFigs = False):
     """
-    MAGE (Minimal Area Gaussian Estimator) workflow to compute outlier scores for genes.
+    MAGE (Monte-carlo method for Aberrant Gene Expression) workflow to compute outlier scores for genes.
 
     Parameters:
     - data_x, data_y: np.ndarray
@@ -74,6 +76,10 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         x_pdf = norm.pdf(x_coords[:, None], gene_mean_x[k], gene_std_x[k])  # Shape: (grid_density, 1)
         y_pdf = norm.pdf(y_coords[None, :], gene_mean_y[k], gene_std_y[k])  # Shape: (1, grid_density)
         density_mat += np.dot(x_pdf, y_pdf)
+
+    if saveFigs:
+        with open("dm.pkl", "wb") as f:
+            pickle.dump((density_mat, units), f)
 
     if output_diags:
         plt.figure(figsize=(8, 6))
@@ -194,8 +200,13 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
 
     # --- Step 6: Output Results ---
     if output_plots:
-        visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_score, monte_carlo_points,
+        output_figure(gene_mean_x, gene_mean_y, adjusted_score, monte_carlo_points,
                               cer, start_x, start_y, grid_width, grid_height, units)
+        
+    if saveFigs:
+        with open("OS.pkl", "wb") as f:
+            pickle.dump((gene_mean_x, gene_mean_y, adjusted_score, monte_carlo_points,
+                              cer, start_x, start_y, grid_width, grid_height, units), f)
         
     return adjusted_score
 
@@ -274,7 +285,7 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
 
 def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False):
+         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, saveFigs=False):
     # permutate data
     data_x, data_y = permute_and_filter(data_x, data_y, outlier_score, 10)
 
@@ -284,7 +295,7 @@ def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_
                     num_starting_contours, monte_carlo_sample_size, output_diags)
     
     # calculate FDR
-    FDR = calculate_fdr(outlier_score, OS_perm, 100, output_plots)
+    FDR = calculate_fdr(outlier_score, OS_perm, 100, output_plots, saveFigs)
 
 def permute_and_filter(dataX, dataY, OutlierScore, num_permutations=10):
     """
@@ -321,7 +332,7 @@ def permute_and_filter(dataX, dataY, OutlierScore, num_permutations=10):
 
     return dataX_filtered, dataY_filtered
 
-def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=False):
+def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=False, saveFigs = False):
     """
     Calculate the False Discovery Rate (FDR) at each Outlier Score (OS).
 
@@ -365,6 +376,10 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
         plt.grid(True)
         plt.legend()
         plt.show()
+
+    if saveFigs:
+        with open("fdr.pkl", "wb") as f:
+            pickle.dump(OS_FDR, f)
 
     # Assign FDR to genes
     gene_FDR = np.zeros((len(OutlierScore), 1))
@@ -530,7 +545,7 @@ def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_wi
     plt.grid(True)
     plt.show()
 
-def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo_points, cer, start_x, start_y, grid_width, grid_height, units):
+def output_figure(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo_points, cer, start_x, start_y, grid_width, grid_height, units):
     """
     Visualizes the outlier scores and characteristic expression regions.
 
@@ -550,13 +565,8 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo
     """
 
     # convert gene means (TPM) points to grid scale
-    print(gene_mean_x)
-    print(start_x)
-    
     gene_mean_x_grid = (gene_mean_x-start_x)/grid_width + 2
     gene_mean_y_grid = (gene_mean_y-start_y)/grid_height + 2
-
-    print(gene_mean_x_grid)
 
     # Scatter plot
     plt.figure(figsize=(10, 6))
@@ -569,7 +579,7 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo
 
     # Overlay the CER
     for region in cer:
-        plt.plot(region[:, 0], region[:, 1], color='black', linestyle='--', label='CER')
+        plt.plot(region[:, 0], region[:, 1], color='b', linestyle='--', label='CER')
 
     plt.xlabel('Mean Expression (' + units + ')')
     plt.ylabel('Mean Expression (' + units + ')')
@@ -585,6 +595,54 @@ def visualize_MC_sampling(gene_mean_x, gene_mean_y, adjusted_scores, monte_carlo
     plt.tick_params(direction='in')
     plt.show()
 
+def csv_setup(fileName):
+        # --- Load data ---
+
+        # find number of genes
+        numGene = -1
+        numSample = -1
+        with open(fileName, 'r') as file:
+            csv_reader = csv.reader(file)
+            for row in csv_reader:
+                numGene+= 1
+                if numSample == -1:
+                    numSample = len(row) - 1
+        file.close()
+
+    
+        # define profile variables
+        if numGene < 1:
+            print("error: could not read file")
+        else:
+            profile = np.zeros((numGene,numSample))
+            sampleName = ['']*numSample
+            geneName = ['']*numGene
+
+            with open(fileName, 'r') as file:
+                csv_reader = csv.reader(file)
+                rowCount = 0
+                for row in csv_reader:
+                    rowCount+= 1
+                    if rowCount == 1:
+                        for i in range(numSample):
+                            sampleName[i] = row[i+1]
+                    else:
+                        geneName[rowCount-2] = row[0]
+                        profile[rowCount-2] = row[1:]
+
+        controlInd = []
+        treatmentInd = []
+
+        for i in range(numSample):
+            if sampleName[i] == 'control':
+                controlInd.append(i)
+            if sampleName[i] == 'treatment':
+                treatmentInd.append(i)
+
+        sampleName = np.array(sampleName)
+        profile = np.array(profile)
+
+        return profile[:,controlInd], profile[:,treatmentInd]
 
 # Example usage
 if __name__ == "__main__":

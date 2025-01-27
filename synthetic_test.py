@@ -18,8 +18,8 @@ def test():
 
     # --- Run MAGE function ---
     print("Running MAGE...")
-    OS = MAGE.mage(data_x, data_y, output_diags=True)
-    #FDR = MAGE.FDR(data_x, data_y, OS)
+    OS = MAGE.mage(data_x, data_y, output_plots=False, output_diags=False, saveFigs=True)
+    FDR = MAGE.FDR(data_x, data_y, OS, output_plots=False, saveFigs=True)
 
     
     #temp = MAGE.analyze_depth(data_x, data_y, (0.1, 0.4, 0.7, 1, 1.3))
@@ -72,8 +72,6 @@ def generate_data(num_genes, replicates, correlation=0.5, avg_std_x=5, avg_std_y
     scale_factor_y = avg_std_y / current_avg_std_y
     data_y = np.mean(data_y, axis=1, keepdims=True) + scale_factor_y * (data_y - np.mean(data_y, axis=1, keepdims=True))
 
-    data_x = -1*data_x
-    print(data_x)
 
     return data_x, data_y
 
