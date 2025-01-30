@@ -126,18 +126,19 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         levels = cs.levels
         plt.close(contour_fig)  # Close the contour plot if no display is needed
 
-        gene_prob_contained_in_lv = np.zeros((len(levels),monte_carlo_sample_size*num_genes))
+        gene_prob_contained_in_lv = np.zeros(len(levels))
 
         for lv, contour_set in enumerate(contours):
             if len(contour_set) == 0:  # Skip empty contours
                 continue
+            gene_prob_contained = np.zeros(monte_carlo_sample_size*num_genes)
             for s in range(len(contour_set)):
                 path = Path(contour_set[s])
                 region_contains = path.contains_points(monte_carlo_points)
-                gene_prob_contained_in_lv[lv,region_contains] = 1
+                gene_prob_contained[region_contains] = 1
+            gene_prob_contained_in_lv[lv] = np.sum(gene_prob_contained)/(monte_carlo_sample_size*num_genes)
                 
 
-        gene_prob_contained_in_lv = np.sum(gene_prob_contained_in_lv,1)/(monte_carlo_sample_size*num_genes)
         cont_effectiveness = 1 - np.abs(target_containment - gene_prob_contained_in_lv)
         optimal_lv_idx = np.argmax(cont_effectiveness)
         
@@ -297,6 +298,8 @@ def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_
     # calculate FDR
     FDR = calculate_fdr(outlier_score, OS_perm, 100, output_plots, saveFigs)
 
+    return np.squeeze(FDR)
+
 def permute_and_filter(dataX, dataY, OutlierScore, num_permutations=10):
     """
     Permute columns of data, and filter out genes with the highest 10% OutlierScore.
@@ -390,52 +393,40 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
 
     return gene_FDR
 
-def analyze_depth(dataX, dataY, depths, include_original = True, units = 'TPM', top_cutoff = 0.05):
+def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replacement=False):
 
     OS = np.zeros((dataX.shape[0],len(depths)))
 
     for d in range(len(depths)):
         print("Running depth " + str(d+1) + " of " + str(len(depths)))
-        dataX_adj, dataY_adj = adjust_depth(dataX, dataY, depths[d])
-        OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= False, units= units, notifications=False)
+        dataX_adj, dataY_adj = adjust_depth(dataX, dataY, depths[d], replacement)
+        OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= True, units= units, notifications=False)
 
-    if include_original:
-        OS_original = mage(dataX, dataY, output_plots=False, units=units, notifications=False)
-        sort_ind = np.argsort(OS_original)
-        top_ind_orig = sort_ind[-int(np.ceil(len(OS_original)*top_cutoff)):]
+    OS_original = mage(dataX, dataY, output_plots=True, units=units, notifications=False)
+    sort_ind = np.argsort(OS_original)
+    top_ind_orig = sort_ind[-int(np.ceil(len(OS_original)*top_cutoff)):]
 
-        agreement = np.zeros((len(depths),1))
+    agreement = np.zeros((len(depths),1))
 
-        for d in range(len(depths)):
-            sort_ind = np.argsort(OS[:,d])
-            top_ind = sort_ind[-int(np.ceil(OS.shape[0]*top_cutoff)):]
-            overlap = np.intersect1d(top_ind,top_ind_orig)
-            agreement[d] = len(overlap)/int(np.ceil(len(OS_original)*top_cutoff))
+    for d in range(len(depths)):
+        sort_ind = np.argsort(OS[:,d])
+        top_ind = sort_ind[-int(np.ceil(OS.shape[0]*top_cutoff)):]
+        overlap = np.intersect1d(top_ind,top_ind_orig)
+        agreement[d] = len(overlap)/int(np.ceil(len(OS_original)*top_cutoff))
 
-        plt.figure(figsize=(10, 8))
-        plt.scatter(depths, agreement, color="red", s=50, edgecolor="k", alpha=0.7)
-        plt.xlabel('Sampling Depth %')
-        plt.ylabel('% Agreement')
-        plt.show()
+    plt.figure(figsize=(10, 8))
+    plt.scatter(depths, agreement, color="red", s=50, edgecolor="k", alpha=0.7)
+    plt.xlabel('Sampling Depth %')
+    plt.ylabel('% Agreement')
+    plt.show()
 
     return agreement
 
-def adjust_depth(dataX, dataY, depth):
+def adjust_depth(dataX, dataY, depth, replacement=False):
     # convert to integers
     num_gene = dataX.shape[0]
-    #fracs = np.zeros((2*num_gene, dataX.shape[1]))
-
-    #for i in range(num_gene):
-    #    for j in range(dataX.shape[1]):
-    #        fracs[i,j] = dataX[i,j] - math.floor(dataX[i,j])
-    #for i in range(num_gene):
-    #    for j in range(dataY.shape[1]):
-    #        fracs[i + num_gene, j] = dataY[i,j] - math.floor(dataY[i,j])
-
-    #minMult = 1/np.min(fracs)
-
-    #dataX = dataX*minMult
-    #dataY = dataY*minMult
+    dataX = dataX
+    dataY = dataY
     dataX = dataX.round()
     dataY = dataY.round()
 
@@ -461,8 +452,12 @@ def adjust_depth(dataX, dataY, depth):
             listedReadY[prevInd:ind] = i
 
         # Binary sampling of indices
-        sampledReadListX = random.choices(listedReadX.tolist(),k=int(depth*totalReadX))
-        sampledReadListY = random.choices(listedReadY.tolist(),k=int(depth*totalReadY))
+        if replacement or depth > 1:
+            sampledReadListX = random.choices(listedReadX.tolist(),k=int(depth*totalReadX))
+            sampledReadListY = random.choices(listedReadY.tolist(),k=int(depth*totalReadY))
+        else:
+            sampledReadListX = random.sample(listedReadX.tolist(), int(depth*totalReadX))
+            sampledReadListY = random.sample(listedReadY.tolist(), int(depth*totalReadY))
 
         # index list
         sampledReadX = [0]*len(sampledReadListX)
@@ -642,7 +637,9 @@ def csv_setup(fileName):
         sampleName = np.array(sampleName)
         profile = np.array(profile)
 
-        return profile[:,controlInd], profile[:,treatmentInd]
+        return profile[:,controlInd], profile[:,treatmentInd], geneName, sampleName
+
+
 
 # Example usage
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import numpy as np
 def test():
     
     # --- Generate synthetic data for testing ---
-    num_genes = 100
+    num_genes = 1000
     num_replicates = 5
     corr = 0.9
 
@@ -18,11 +18,14 @@ def test():
 
     # --- Run MAGE function ---
     print("Running MAGE...")
-    OS = MAGE.mage(data_x, data_y, output_plots=False, output_diags=False, saveFigs=True)
-    FDR = MAGE.FDR(data_x, data_y, OS, output_plots=False, saveFigs=True)
+    #OS = MAGE.mage(data_x, data_y, output_plots=False, output_diags=False, saveFigs=True)
+    #FDR = MAGE.FDR(data_x, data_y, OS, output_plots=False, saveFigs=False)
 
     
-    #temp = MAGE.analyze_depth(data_x, data_y, (0.1, 0.4, 0.7, 1, 1.3))
+    temp = MAGE.analyze_depth(data_x, data_y, (0.1, 0.3, 0.5, 0.7, 0.9))
+
+    # output to csv
+    #np.savetxt('output.csv', np.c_[OS,FDR], delimiter=',',header="OS,FDR")
 
 def generate_data(num_genes, replicates, correlation=0.5, avg_std_x=5, avg_std_y=5):
     """
