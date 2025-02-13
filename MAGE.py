@@ -45,7 +45,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
     - out_indices: np.ndarray
         Indices of genes classified as "outliers."
     """
-    assert data_x.shape == data_y.shape, "data_x and data_y must have the same shape"
+    assert data_x.shape[0] == data_y.shape[0], "data_x and data_y must have the same shape"
     assert grid_density > 0, "Grid density must be a positive integer"
     assert 0 < target_containment < 1, "Target containment must be between 0 and 1"
 
@@ -104,14 +104,9 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         cer_plot_fig = plt.figure(figsize=(10, 6))
         cer_plot = cer_plot_fig.subplots()
 
-    # monte carlo sampling from each gene
-    monte_carlo_points = np.zeros((num_genes*monte_carlo_sample_size,2))
-    for i in range(num_genes):
-        ind = monte_carlo_sample_size*(i-1)
-        monte_carlo_points[range(ind,ind+monte_carlo_sample_size),:] = np.column_stack([
-                    np.random.normal(gene_mean_x[i], gene_std_x[i], monte_carlo_sample_size),
-                    np.random.normal(gene_mean_y[i], gene_std_y[i], monte_carlo_sample_size),])
-    
+    # get MC points
+    monte_carlo_sample_size_CER = round(0.1*monte_carlo_sample_size)
+    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size_CER)
     # convert MC points (TPM) points to grid scale
     monte_carlo_points[:,0] = (monte_carlo_points[:,0]-start_x)/grid_width + 2
     monte_carlo_points[:,1] = (monte_carlo_points[:,1]-start_y)/grid_height + 2
@@ -131,12 +126,12 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         for lv, contour_set in enumerate(contours):
             if len(contour_set) == 0:  # Skip empty contours
                 continue
-            gene_prob_contained = np.zeros(monte_carlo_sample_size*num_genes)
+            gene_prob_contained = np.zeros(monte_carlo_sample_size_CER*num_genes)
             for s in range(len(contour_set)):
                 path = Path(contour_set[s])
                 region_contains = path.contains_points(monte_carlo_points)
                 gene_prob_contained[region_contains] = 1
-            gene_prob_contained_in_lv[lv] = np.sum(gene_prob_contained)/(monte_carlo_sample_size*num_genes)
+            gene_prob_contained_in_lv[lv] = np.sum(gene_prob_contained)/(monte_carlo_sample_size_CER*num_genes)
                 
 
         cont_effectiveness = 1 - np.abs(target_containment - gene_prob_contained_in_lv)
@@ -178,6 +173,11 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
     outlier_score = np.zeros(num_genes)
     outlier_dist_score = np.zeros(num_genes)
 
+    # get new MC points
+    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size)
+    # convert MC points (TPM) points to grid scale
+    monte_carlo_points[:,0] = (monte_carlo_points[:,0]-start_x)/grid_width + 2
+    monte_carlo_points[:,1] = (monte_carlo_points[:,1]-start_y)/grid_height + 2
 
     # Vectorized Monte Carlo sampling for outlier scores
     outlier_score = np.zeros(num_genes)
@@ -195,7 +195,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
 
     # --- Step 5: Adjust outlier scores ---
     if notifications: print("Adjusting outlier scores...")
-    adjusted_score, inliers, outliers = adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
+    adjusted_score = adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
                                                             remove_high_low_expr, target_containment, num_genes,
                                                             notifications=notifications)
 
@@ -211,6 +211,17 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         
     return adjusted_score
 
+def MC_points(mean_x, mean_y, std_x, std_y, sample_size):
+    # monte carlo sampling from each gene
+    num_gene = len(mean_x)
+    points = np.zeros((num_gene*sample_size,2))
+    for i in range(num_gene):
+        ind = sample_size*(i-1)
+        points[range(ind,ind+sample_size),:] = np.column_stack([
+                    np.random.normal(mean_x[i], std_x[i], sample_size),
+                    np.random.normal(mean_y[i], std_y[i], sample_size),])
+
+    return points
 
 def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
                           remove_high_low_expr, target_containment, num_genes, notifications = True):
@@ -275,14 +286,7 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
     adjusted_outlier_score[adjusted_outlier_score < 0] = 0
     adjusted_outlier_score[adjusted_outlier_score > 1] = 1
 
-    # Identify genes with top 5% highest outlier scores
-    sorted_indices = np.argsort(adjusted_outlier_score)
-    in_count = sorted_indices[:int(0.95 * len(adjusted_outlier_score))]
-    in_indices = np.zeros_like(adjusted_outlier_score, dtype=bool)
-    in_indices[in_count] = True
-    out_indices = np.where(~in_indices)[0]
-
-    return adjusted_outlier_score, np.where(in_indices)[0], out_indices
+    return adjusted_outlier_score
 
 def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
@@ -400,9 +404,9 @@ def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replac
     for d in range(len(depths)):
         print("Running depth " + str(d+1) + " of " + str(len(depths)))
         dataX_adj, dataY_adj = adjust_depth(dataX, dataY, depths[d], replacement)
-        OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= True, units= units, notifications=False)
+        OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= False, units= units, notifications=False, remove_high_low_expr=False)
 
-    OS_original = mage(dataX, dataY, output_plots=True, units=units, notifications=False)
+    OS_original = mage(dataX, dataY, output_plots=False, units=units, notifications=False, remove_high_low_expr=False)
     sort_ind = np.argsort(OS_original)
     top_ind_orig = sort_ind[-int(np.ceil(len(OS_original)*top_cutoff)):]
 
@@ -425,8 +429,6 @@ def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replac
 def adjust_depth(dataX, dataY, depth, replacement=False):
     # convert to integers
     num_gene = dataX.shape[0]
-    dataX = dataX
-    dataY = dataY
     dataX = dataX.round()
     dataY = dataY.round()
 
@@ -471,10 +473,82 @@ def adjust_depth(dataX, dataY, depth, replacement=False):
 
         # calculate new expression with reduced depth
         for i in range(num_gene):
-            dataX[i,rep] = sampledReadX.count(i)
-            dataY[i,rep] = sampledReadY.count(i)
+            dataX[i,rep] = sampledReadX.count(i)*(1/depth)
+            dataY[i,rep] = sampledReadY.count(i)*(1/depth)
     
     return dataX, dataY
+
+def analyze_samples(dataX, dataY, samples, trials=0, top_cutoff = 0.05, replacement=False, saveData=False):
+
+    OS_original = mage(dataX, dataY, output_plots=False, notifications=False, remove_high_low_expr=False)
+    sort_ind = np.argsort(OS_original)
+    top_ind_orig = sort_ind[-int(np.ceil(len(OS_original)*top_cutoff)):]
+
+    agreement = np.zeros((len(samples),trials))
+    std_dev = np.zeros(len(samples))
+
+    for t in range(trials):
+        if trials > 0: print("Running trial " + str(t+1) + " of " + str(trials))
+
+        OS = np.zeros((dataX.shape[0],len(samples)))
+
+        for d in range(len(samples)):
+            print("Running sampling " + str(d+1) + " of " + str(len(samples)))
+            dataX_adj, dataY_adj = adjust_samples(dataX, dataY, samples[d], replacement)
+            OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= False, notifications=False, remove_high_low_expr=False)
+
+    
+
+
+        for d in range(len(samples)):
+            sort_ind = np.argsort(OS[:,d])
+            top_ind = sort_ind[-int(np.ceil(OS.shape[0]*top_cutoff)):]
+            overlap = np.intersect1d(top_ind,top_ind_orig)
+            agreement[d,t] = len(overlap)/int(np.ceil(len(OS_original)*top_cutoff))
+
+    for d in range(len(samples)):
+        std_dev[d] = np.std(agreement[d])
+
+    agreement = np.mean(agreement,1)
+
+    if saveData:
+        with open("sampleDepth.pkl", "wb") as f:
+            pickle.dump((samples, agreement, std_dev), f)
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(samples, agreement, color="red")
+    plt.scatter(samples, agreement, color="red", s=50)
+    plt.errorbar(samples, agreement, yerr=std_dev, fmt='none', ecolor='r')
+    plt.ylim(0,1)
+    plt.xlabel('Sampling %')
+    plt.ylabel('% Agreement')
+    plt.show()
+
+    return agreement
+
+def adjust_samples(dataX, dataY, samples, replacement=False):
+    
+    num_sampleX = dataX.shape[1]
+    num_sampleY = dataY.shape[1]
+
+    # Binary sampling
+    if replacement or samples > 1:
+        Xind = random.choices(range(num_sampleX),k=round(int(samples*num_sampleX)))
+        Yind = random.choices(range(num_sampleY),k=round(int(samples*num_sampleY)))
+    else:
+        Xind = random.sample(range(num_sampleX), round(int(samples*num_sampleX)))
+        Yind = random.sample(range(num_sampleY), round(int(samples*num_sampleY)))
+
+    # index list
+    dataX_adj = np.zeros((dataX.shape[0],len(Xind)))
+    dataY_adj = np.zeros((dataY.shape[0],len(Yind)))
+
+    for i,ind in enumerate(Xind):
+        dataX_adj[:,i] = dataX[:,ind]
+    for i,ind in enumerate(Yind):
+        dataY_adj[:,i] = dataY[:,ind]
+    
+    return dataX_adj, dataY_adj
 
 def visualize_all_contours(density_mat, contour_range, start_x, start_y, grid_width, grid_height, 
     gene_mean_x, gene_mean_y, gene_std_x=None, gene_std_y=None, units = 'TPM'):

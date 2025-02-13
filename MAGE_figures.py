@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import pickle
 
+# options
+saveHighRes = True
+
 
 # Density Matrix
 try:
@@ -93,3 +96,26 @@ try:
 
 except:
     print('FDR figure data not found...')
+
+    # Sampling Depth
+try:
+    with open("sampleDepth.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    samples = data[0]
+    agreement = data[1]
+    std_dev = data[2]
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(samples, agreement, color="red", linewidth=5)
+    plt.scatter(samples, agreement, color="red", s=100)
+    plt.errorbar(samples, agreement, yerr=std_dev, fmt='none', ecolor='r')
+    plt.ylim(0,1)
+    plt.xlabel('Sampling %', fontsize=20)
+    plt.ylabel('% Agreement', fontsize=20)
+    plt.tick_params(labelsize=20)
+    if saveHighRes: plt.savefig('sampleDepth.png', dpi=600)
+    plt.show()
+
+except EOFError:
+    print('Sample depth figure data not found...')

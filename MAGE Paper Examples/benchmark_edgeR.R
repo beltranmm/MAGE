@@ -13,12 +13,13 @@
 
 # read input from csv created in MATLAB
 
-setwd("E:/MAGE paper/MAGE MATLAB/workspaces/edgeR")
+#setwd("E:/MAGE paper/MAGE MATLAB/workspaces/edgeR")
+setwd("C:/Users/Matthew/Documents/GitHub/MAGE/MAGE Paper Examples/workspaces/edgeR")
 colData <- read.csv("colData.csv",header = FALSE, sep = ",")
-cts <- read.csv("cts.csv",header = FALSE, sep = ",")
+cts <- read.csv("cts_mtor.csv",header = FALSE, sep = ",")
 batch <- read.csv("batch.csv",header = FALSE, sep = ",")
 condition <- read.csv("condition.csv",header = FALSE, sep = ",")
-geneName <- read.csv("geneName.csv",header = FALSE, sep = ",")
+geneName <- read.csv("gene_name_mtor.csv",header = FALSE, sep = ",")
 
 
 
@@ -29,6 +30,7 @@ grps <- as.factor(condition$V1)
 
 
 # create edgeR object DGEList
+library(edgeR)
 y <- DGEList(counts=cts,group=grps)
 
 # filtering
@@ -69,6 +71,6 @@ exportResults <- data.frame(gene_name = geneName[row.names(lrt[["coefficients"]]
                             p_val = lrt[["table"]][["PValue"]],
                             qF_test = qlf[["table"]][["F"]],
                             qF_p_val = qlf[["table"]][["PValue"]])
-write.csv(exportResults,"benchmark_edgeR.csv",row.names = FALSE)
+write.csv(exportResults,"benchmark_edgeR_mtor_2_4_25.csv",row.names = FALSE)
 
 
