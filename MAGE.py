@@ -7,12 +7,13 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.stats import norm
 from scipy.spatial.distance import euclidean
+import math
 import csv
 import pickle
 
 def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True, 
          target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
-         num_starting_contours=20, monte_carlo_sample_size=1000, output_diags=False, units = 'TPM',
+         num_starting_contours=20, monte_carlo_sample_size=1000, nonnegative = True, output_diags=False, units = 'TPM',
          notifications = True, saveFigs = False):
     """
     MAGE (Monte-carlo method for Aberrant Gene Expression) workflow to compute outlier scores for genes.
@@ -67,7 +68,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
     start_x = np.min(gene_mean_x) - 2 * np.mean(np.abs(gene_std_x)) + 0.00001
     start_y = np.min(gene_mean_y) - 2 * np.mean(np.abs(gene_std_y)) + 0.00001
 
-    # Monte Carlo sampling to fill the density matrix
+    # Gaussian PDF to fill the density matrix
     if notifications: print("Summing gene probabilities...")
     x_coords = np.linspace(start_x, start_x + grid_density * grid_width, grid_density)
     y_coords = np.linspace(start_y, start_y + grid_density * grid_height, grid_density)
@@ -76,6 +77,12 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         x_pdf = norm.pdf(x_coords[:, None], gene_mean_x[k], gene_std_x[k])  # Shape: (grid_density, 1)
         y_pdf = norm.pdf(y_coords[None, :], gene_mean_y[k], gene_std_y[k])  # Shape: (1, grid_density)
         density_mat += np.dot(x_pdf, y_pdf)
+
+    if nonnegative:
+        for i in range(grid_density):
+            for j in range(grid_density):
+                if x_coords[i] <= 0 or y_coords[j] <= 0:
+                    density_mat[i,j] = 0
 
     if saveFigs:
         with open("dm.pkl", "wb") as f:
@@ -106,7 +113,7 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
 
     # get MC points
     monte_carlo_sample_size_CER = round(0.1*monte_carlo_sample_size)
-    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size_CER)
+    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size_CER,nonnegative)
     # convert MC points (TPM) points to grid scale
     monte_carlo_points[:,0] = (monte_carlo_points[:,0]-start_x)/grid_width + 2
     monte_carlo_points[:,1] = (monte_carlo_points[:,1]-start_y)/grid_height + 2
@@ -174,13 +181,14 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
     outlier_dist_score = np.zeros(num_genes)
 
     # get new MC points
-    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size)
-    # convert MC points (TPM) points to grid scale
+    monte_carlo_points = MC_points(gene_mean_x,gene_mean_y,gene_std_x,gene_std_y,monte_carlo_sample_size,nonnegative)
+    # convert MC points and gene means (TPM) points to grid scale
     monte_carlo_points[:,0] = (monte_carlo_points[:,0]-start_x)/grid_width + 2
     monte_carlo_points[:,1] = (monte_carlo_points[:,1]-start_y)/grid_height + 2
+    gene_mean_x_grid = (gene_mean_x-start_x)/grid_width + 2
+    gene_mean_y_grid = (gene_mean_y-start_y)/grid_height + 2
 
     # Vectorized Monte Carlo sampling for outlier scores
-    outlier_score = np.zeros(num_genes)
     for i in range(num_genes):
         for region in cer:
             if len(region) == 0:
@@ -189,7 +197,13 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
             path = Path(region)
             ind = monte_carlo_sample_size*(i-1)
             outlier_score[i]+= np.sum(path.contains_points(monte_carlo_points[range(ind,ind+monte_carlo_sample_size),:]))
-
+            dist = distance_point_to_path((gene_mean_x_grid[i],gene_mean_y_grid[i]),region)
+            if outlier_dist_score[i] == 0 or abs(outlier_dist_score[i]) > dist:
+                # check if inside/outside CER (inside is negative)
+                if path.contains_point((gene_mean_x_grid[i],gene_mean_y_grid[i])):
+                    outlier_dist_score[i] = -1*dist
+                else:
+                    outlier_dist_score[i] = dist
         
     outlier_score = 1 - outlier_score / monte_carlo_sample_size
 
@@ -211,15 +225,36 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         
     return adjusted_score
 
-def MC_points(mean_x, mean_y, std_x, std_y, sample_size):
+def MC_points(mean_x, mean_y, std_x, std_y, sample_size, nonnegative=True):
     # monte carlo sampling from each gene
     num_gene = len(mean_x)
     points = np.zeros((num_gene*sample_size,2))
-    for i in range(num_gene):
-        ind = sample_size*(i-1)
-        points[range(ind,ind+sample_size),:] = np.column_stack([
-                    np.random.normal(mean_x[i], std_x[i], sample_size),
-                    np.random.normal(mean_y[i], std_y[i], sample_size),])
+    if nonnegative:
+        for i in range(num_gene):
+            keep_points = np.zeros((sample_size,2))
+            neg = True
+            while neg:
+                indX = np.asarray(keep_points[:,0] <= 0).nonzero()[0]
+                indY = np.asarray(keep_points[:,1] <= 0).nonzero()[0]
+                if len(indX) == 0 and len(indY) == 0:
+                    neg = False
+                else:
+                    if len(indX) != 0:
+                        new_pointsX = np.random.normal(mean_x[i], std_x[i], len(indX))
+                        keep_points[indX,0] = new_pointsX
+
+                    if len(indY) != 0:
+                        new_pointsY = np.random.normal(mean_y[i], std_y[i], len(indY))
+                        keep_points[indY,1] = new_pointsY
+            
+            ind = sample_size*(i-1)
+            points[range(ind,ind+sample_size),:] = keep_points
+    else:
+        for i in range(num_gene):
+            ind = sample_size*(i-1)
+            points[range(ind,ind+sample_size),:] = np.column_stack([
+                        np.random.normal(mean_x[i], std_x[i], sample_size),
+                        np.random.normal(mean_y[i], std_y[i], sample_size),])
 
     return points
 
@@ -282,22 +317,23 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
     d_penalty[negative_d_indices] = d_penalty[negative_d_indices] / len(negative_d_indices)
 
     # Adjust outlier score by standard deviation
-    adjusted_outlier_score = outlier_score + d_penalty
+    adjusted_outlier_score = outlier_score - d_penalty
     adjusted_outlier_score[adjusted_outlier_score < 0] = 0
     adjusted_outlier_score[adjusted_outlier_score > 1] = 1
 
     return adjusted_outlier_score
 
-def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=20, output_plots=True, 
-         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=10, 
-         num_starting_contours=200, monte_carlo_sample_size=1000, output_diags=False, saveFigs=False):
+def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=5, output_plots=True, 
+         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
+         num_starting_contours=20, monte_carlo_sample_size=1000, nonnegative=True, output_diags=False, saveFigs=False):
+    
     # permutate data
     data_x, data_y = permute_and_filter(data_x, data_y, outlier_score, 10)
 
     # call MAGE w/ permutated data
     OS_perm = mage(data_x, data_y, grid_density, num_contours, output_plots,
                     target_containment, remove_high_low_expr, contour_loops_max, 
-                    num_starting_contours, monte_carlo_sample_size, output_diags)
+                    num_starting_contours, monte_carlo_sample_size, nonnegative, output_diags)
     
     # calculate FDR
     FDR = calculate_fdr(outlier_score, OS_perm, 100, output_plots, saveFigs)
@@ -396,6 +432,45 @@ def calculate_fdr(OutlierScore, OutlierScore_perm, num_steps=100, output_plot=Fa
 
 
     return gene_FDR
+
+def distance_point_to_segment(point, segment_start, segment_end):
+    """Calculates the distance from a point to a line segment."""
+    
+    p_x, p_y = point
+    s_x1, s_y1 = segment_start
+    s_x2, s_y2 = segment_end
+    
+    segment_vector_x = s_x2 - s_x1
+    segment_vector_y = s_y2 - s_y1
+    
+    point_vector_x = p_x - s_x1
+    point_vector_y = p_y - s_y1
+    
+    segment_length_squared = segment_vector_x**2 + segment_vector_y**2
+    
+    if segment_length_squared == 0:
+      return math.sqrt(point_vector_x**2 + point_vector_y**2)
+    
+    t = max(0, min(1, (point_vector_x * segment_vector_x + point_vector_y * segment_vector_y) / segment_length_squared))
+    
+    closest_x = s_x1 + t * segment_vector_x
+    closest_y = s_y1 + t * segment_vector_y
+    
+    return math.sqrt((p_x - closest_x)**2 + (p_y - closest_y)**2)
+
+def distance_point_to_path(point, path):
+    """Calculates the shortest distance from a point to a path."""
+    
+    min_distance = float('inf')
+    
+    for i in range(len(path) - 1):
+        segment_start = path[i]
+        segment_end = path[i+1]
+        
+        distance = distance_point_to_segment(point, segment_start, segment_end)
+        min_distance = min(min_distance, distance)
+    
+    return min_distance
 
 def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replacement=False):
 

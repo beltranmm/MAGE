@@ -24,8 +24,10 @@ def test():
         #                output_plots=True, output_diags=False, saveFigs=False)
         #FDR = MAGE.FDR(profile[:,np.min(ECs):np.max(ECs)], profile[:,np.min(Ms):np.max(Ms)]
         #               , OS, output_plots=False, output_diags=False, saveFigs=True, contour_loops_max=5)
-        temp = MAGE.analyze_samples(profile[:,np.min(ECs):np.max(ECs)], profile[:,np.min(Ms):np.max(Ms)],
-                                   (0.001, 0.005, 0.01, 0.03, 0.05, 0.1, 0.3, 0.5), trials=5, saveData=True)
+        #temp = MAGE.analyze_samples(profile[:,np.min(ECs):np.max(ECs)], profile[:,np.min(Ms):np.max(Ms)],
+        #                           (0.001, 0.005, 0.01, 0.03, 0.05, 0.1, 0.3, 0.5), trials=5, saveData=True)
+        temp = MAGE.analyze_depth(profile[:,np.min(ECs):np.max(ECs)], profile[:,np.min(Ms):np.max(Ms)],
+                                   (0.1, 0.3, 0.5, 0.7, 0.9))
         #np.savetxt('mtor_python_results.csv', np.c_[np.array(geneName),OS,FDR], fmt='%s', delimiter=',',header="Gene,OS,FDR")
 
 
