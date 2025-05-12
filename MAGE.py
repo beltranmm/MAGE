@@ -12,7 +12,7 @@ import csv
 import pickle
 
 def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True, 
-         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
+         target_containment=0.95, remove_high_low_expr=True, dist_adj=True, contour_loops_max=20, 
          num_starting_contours=20, monte_carlo_sample_size=1000, nonnegative = True, output_diags=False, units = 'TPM',
          notifications = True, saveFigs = False):
     """
@@ -39,12 +39,8 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         Number of Monte Carlo samples per gene (default=1000).
 
     Returns:
-    - adjusted_outlier_score: np.ndarray
-        Final adjusted outlier scores.
-    - in_indices: np.ndarray
-        Indices of genes classified as "inliers."
-    - out_indices: np.ndarray
-        Indices of genes classified as "outliers."
+    - outlier_score: np.ndarray
+        Final outlier scores.
     """
     assert data_x.shape[0] == data_y.shape[0], "data_x and data_y must have the same shape"
     assert grid_density > 0, "Grid density must be a positive integer"
@@ -96,6 +92,9 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
         plt.xlabel('Mean Expression (' + units + ')')
         plt.ylabel('Mean Expression (' + units + ')')
         plt.show()
+
+    # transpose density matrix
+    density_mat = density_mat.transpose()
 
     # --- Step 3: Determine CER (Characteristic Expression Region) ---
     if notifications: print("Determining characteristic expression region...")
@@ -210,7 +209,8 @@ def mage(data_x, data_y, grid_density=50, num_contours=5, output_plots=True,
     # --- Step 5: Adjust outlier scores ---
     if notifications: print("Adjusting outlier scores...")
     adjusted_score = adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
-                                                            remove_high_low_expr, target_containment, num_genes,
+                                                            remove_high_low_expr, dist_adj,
+                                                            target_containment, num_genes,
                                                             notifications=notifications)
 
     # --- Step 6: Output Results ---
@@ -259,7 +259,7 @@ def MC_points(mean_x, mean_y, std_x, std_y, sample_size, nonnegative=True):
     return points
 
 def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score, 
-                          remove_high_low_expr, target_containment, num_genes, notifications = True):
+                          remove_high_low_expr, dist_adj, target_containment, num_genes, notifications = True):
     """
     Adjusts the outlier scores by removing high/low expression outliers and ranking distance scores.
 
@@ -309,22 +309,25 @@ def adjust_outlier_scores(data_x, data_y, outlier_score, outlier_dist_score,
     # Cap outlier score at 1
     outlier_score[outlier_score > 1] = 1
 
-    # Rank order distance scores < 0
-    d_penalty = np.zeros_like(outlier_dist_score)
-    negative_d_indices = np.where(outlier_dist_score < 0)[0]
-    ranked_indices = np.argsort(np.abs(outlier_dist_score[negative_d_indices]))
-    d_penalty[negative_d_indices[ranked_indices]] = np.arange(len(negative_d_indices))
-    d_penalty[negative_d_indices] = d_penalty[negative_d_indices] / len(negative_d_indices)
+    if dist_adj:
+        # Rank order distance scores < 0
+        d_penalty = np.zeros_like(outlier_dist_score)
+        negative_d_indices = np.where(outlier_dist_score < 0)[0]
+        ranked_indices = np.argsort(np.abs(outlier_dist_score[negative_d_indices]))
+        d_penalty[negative_d_indices[ranked_indices]] = np.arange(len(negative_d_indices))
+        d_penalty[negative_d_indices] = d_penalty[negative_d_indices] / len(negative_d_indices)
 
-    # Adjust outlier score by standard deviation
-    adjusted_outlier_score = outlier_score - d_penalty
-    adjusted_outlier_score[adjusted_outlier_score < 0] = 0
-    adjusted_outlier_score[adjusted_outlier_score > 1] = 1
+        # Adjust outlier score by standard deviation
+        adjusted_outlier_score = outlier_score - d_penalty
+        adjusted_outlier_score[adjusted_outlier_score < 0] = 0
+        adjusted_outlier_score[adjusted_outlier_score > 1] = 1
+    else:
+        adjusted_outlier_score = outlier_score
 
     return adjusted_outlier_score
 
 def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=5, output_plots=True, 
-         target_containment=0.95, remove_high_low_expr=True, contour_loops_max=20, 
+         target_containment=0.95, remove_high_low_expr=True, dist_adj=True, contour_loops_max=20, 
          num_starting_contours=20, monte_carlo_sample_size=1000, nonnegative=True, output_diags=False, saveFigs=False):
     
     # permutate data
@@ -332,7 +335,7 @@ def FDR(data_x, data_y, outlier_score, grid_density=50, num_contours=5, output_p
 
     # call MAGE w/ permutated data
     OS_perm = mage(data_x, data_y, grid_density, num_contours, output_plots,
-                    target_containment, remove_high_low_expr, contour_loops_max, 
+                    target_containment, remove_high_low_expr, dist_adj, contour_loops_max, 
                     num_starting_contours, monte_carlo_sample_size, nonnegative, output_diags)
     
     # calculate FDR
@@ -472,14 +475,25 @@ def distance_point_to_path(point, path):
     
     return min_distance
 
-def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replacement=False):
+def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replacement=False, save_data=False):
 
     OS = np.zeros((dataX.shape[0],len(depths)))
+
+    if save_data:
+        dataSave = np.zeros((dataX.shape[0], dataX.shape[1], 2, len(depths)))
 
     for d in range(len(depths)):
         print("Running depth " + str(d+1) + " of " + str(len(depths)))
         dataX_adj, dataY_adj = adjust_depth(dataX, dataY, depths[d], replacement)
+
+        if save_data:
+            dataSave[:,:,0,d] = dataX_adj
+            dataSave[:,:,1,d] = dataY_adj
+
         OS[:,d] = mage(dataX_adj, dataY_adj, output_plots= False, units= units, notifications=False, remove_high_low_expr=False)
+
+    if save_data:
+        np.savetxt('depth_data.csv', dataSave, fmt='%s', delimiter=',')
 
     OS_original = mage(dataX, dataY, output_plots=False, units=units, notifications=False, remove_high_low_expr=False)
     sort_ind = np.argsort(OS_original)
@@ -494,7 +508,8 @@ def analyze_depth(dataX, dataY, depths, units = 'TPM', top_cutoff = 0.05, replac
         agreement[d] = len(overlap)/int(np.ceil(len(OS_original)*top_cutoff))
 
     plt.figure(figsize=(10, 8))
-    plt.scatter(depths, agreement, color="red", s=50, edgecolor="k", alpha=0.7)
+    plt.plot(depths, agreement, color="red")
+    plt.scatter(depths, agreement, color="red", s=50)
     plt.xlabel('Sampling Depth %')
     plt.ylabel('% Agreement')
     plt.show()

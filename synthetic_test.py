@@ -8,8 +8,8 @@ import numpy as np
 def test():
     
     # --- Generate synthetic data for testing ---
-    num_genes = 1000
-    num_replicates = 100
+    num_genes = 5000
+    num_replicates = 2
     corr = 0.9
 
     # Random gene expression data for X and Y (simulating biological data)
@@ -18,13 +18,13 @@ def test():
 
     # --- Run MAGE function ---
     print("Running MAGE...")
-    #OS = MAGE.mage(data_x, data_y, output_plots=True, output_diags=False, saveFigs=True)
+    OS = MAGE.mage(data_x, data_y, output_plots=True, output_diags=False, saveFigs=False)
     #FDR = MAGE.FDR(data_x, data_y, OS, output_plots=False, saveFigs=False)
 
-    MAGE.analyze_samples(data_x, data_y,(0.05, 0.1, 0.3, 0.5, 0.9),trials=3)
+    #MAGE.analyze_samples(data_x, data_y,(0.05, 0.1, 0.3, 0.5, 0.9),trials=3)
     
-    #temp = MAGE.analyze_depth(data_x, data_y, (0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9))
-    #temp = MAGE.analyze_depth(data_x, data_y, (0.1, 0.3, 0.5, 0.7, 0.9))
+    #MAGE.analyze_depth(data_x, data_y, (0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9))
+    #MAGE.analyze_depth(data_x, data_y, (0.1, 0.3, 0.5, 0.7, 0.9))
 
     # output to csv
     #np.savetxt('output.csv', np.c_[OS,FDR], delimiter=',',header="OS,FDR")
